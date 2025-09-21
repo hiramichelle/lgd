@@ -32,9 +32,9 @@ import matplotlib.dates as mdates # mdatesをインポート
 # === 修正案1: フォント設定全体をコメントアウト (最も安全) ===
 # デプロイ環境で日本語フォントの特定の問題を回避し、
 # アプリケーションが起動することを最優先する場合。
-# plt.rcParams['font.family'] = 'sans-serif' 
-# plt.rcParams['axes.unicode_minus'] = False
-# font_prop = fm.FontProperties(family='sans-serif')
+plt.rcParams['font.family'] = 'sans-serif' 
+plt.rcParams['axes.unicode_minus'] = False
+font_prop = fm.FontProperties(family='sans-serif')
 
 # === 修正案2: より安全なフォント設定 (グラフ部分のみで影響) ===
 # アプリケーションの起動時のエラーを回避し、グラフ描画時のみ影響を与えるようにする
@@ -61,7 +61,7 @@ try:
     st.title('📊 Jリーグデータビューア')
 
     # --- データの取得 ---
-    current_year = 2024 # ここを2024に変更！
+    current_year = 2025 # ここを2024に変更！
     ranking_urls = {
         'J1': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E5%AE%89%E7%94%B0%EF%BC%AA%EF%BC%91%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={current_year}&yearId={current_year}&competitionId=651&competitionSectionId=0&search=search',
         'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E5%AE%89%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={current_year}&yearId={current_year}&competitionId=655&competitionSectionId=0&search=search',
