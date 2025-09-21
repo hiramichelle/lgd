@@ -52,7 +52,64 @@ logging.basicConfig(
 
 logging.info("--- アプリケーション開始 ---")
 
-# ... (中略：Webスクレイピング関数、データ加工関数) ...
+# --------------------------------------------------------------------------
+# Webスクレイピング関数
+# --------------------------------------------------------------------------
+@st.cache_data
+def scrape_ranking_data(url):
+    """
+    Jリーグ公式サイトから順位表をスクレイピングする関数。
+    """
+    logging.info(f"scrape_ranking_data: URL {url} からスクレイピング開始。")
+    try:
+        dfs = pd.read_html(url, flavor='lxml', header=0, match='順位')
+        if not dfs:
+            logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
+            return None
+        df = dfs[0]
+        logging.info(f"順位表スクレイピング成功。DataFrameの形状: {df.shape}")
+        if '備考' in df.columns:
+            df = df.drop(columns=['備考'])
+        return df
+    except Exception as e:
+        logging.error(f"順位表スクレイピング中にエラーが発生: {e}")
+        # st.errorはStreamlitのUIに表示されるため、デプロイ時にユーザーに見せるべきです。
+        st.error(f"順位表データ取得エラー: {e}")
+        return None
+
+@st.cache_data
+def scrape_schedule_data(url):
+    """
+    Jリーグ公式サイトから日程表をスクレイピングする関数。
+    """
+    logging.info(f"scrape_schedule_data: URL {url} からスクレイピング開始。")
+    try:
+        dfs = pd.read_html(url, flavor='lxml', header=0, match='試合日')
+        
+        if not dfs:
+            logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
+            return None
+            
+        df = dfs[0]
+        logging.info(f"日程表スクレイピング成功。DataFrameの形状: {df.shape}, カラム数: {len(df.columns)}")
+        
+        expected_cols = ['大会', '試合日', 'キックオフ', 'スタジアム', 'ホーム', 'スコア', 'アウェイ', 'テレビ中継']
+        
+        cols_to_keep = [col for col in expected_cols if col in df.columns]
+        
+        if len(cols_to_keep) < 5:
+            logging.error("抽出できた列数が少なすぎます。サイトのレイアウトが大幅に変更された可能性があります。")
+            st.error("日程表の列情報が想定と異なります。サイトをご確認ください。")
+            return None
+        
+        df = df[cols_to_keep]
+
+        return df
+        
+    except Exception as e:
+        logging.error(f"日程表スクレイピング中にエラーが発生: {e}")
+        st.error(f"日程表データ取得エラー: {e}")
+        return None
 
 # --------------------------------------------------------------------------
 # アプリケーション本体
