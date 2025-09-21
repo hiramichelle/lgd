@@ -78,7 +78,7 @@ try:
 
     # ... (中略：サイドバー、順位表、日程表、直近5試合の表示ロジック) ...
 
-    elif data_type == "順位変動グラフ":
+    if data_type == "順位変動グラフ":
         st.header("チーム別 順位変動グラフ")
         pointaggregate_df = create_point_aggregate_df(schedule_df)
         if not pointaggregate_df.empty:
