@@ -3,25 +3,22 @@ import pandas as pd
 import logging
 import requests
 import matplotlib.pyplot as plt
-#import matplotlib.font_manager as fm
-#import matplotlib.ticker as ticker
+import matplotlib.font_manager as fm # フォント設定を手動で行う場合に備えてインポートは残しておく
+import matplotlib.ticker as ticker
 import matplotlib.dates as mdates
-import japanize_matplotlib
+
+# lxmlはpandas.read_htmlのflavor='lxml'で使用されるため、直接インポートは不要
 
 # --- 日本語フォント設定 ---
-# デプロイ環境ではフォント関連でエラーが発生しやすいので、
-# ここではエラーでアプリが停止しないように、より慎重な設定をします。
-# 日本語は文字化けする可能性がありますが、アプリの起動を優先します。
+# japanize-matplotlibがPython 3.12+環境で問題があるため、
+# ここでは日本語フォントの設定は行わず、matplotlibのデフォルトフォントを使用します。
+# 日本語は文字化けする可能性がありますが、アプリの起動を最優先します。
 try:
     plt.rcParams['axes.unicode_minus'] = False # マイナス記号の表示は維持
-    # font_prop は、グラフ描画関数内で必要に応じて設定するか、
-    # matplotlibのデフォルトフォントに任せる
     st.info("※日本語フォントはデプロイ環境で利用できない可能性があります。グラフの日本語が文字化けする場合はご容赦ください。")
 except Exception as e:
     st.warning(f"フォント設定中に予期せぬエラーが発生しました: {e}。デフォルトフォントを使用します。")
     plt.rcParams['axes.unicode_minus'] = False
-
-japanize_matplotlib.japanize()
 
 # --- ログ設定 ---
 logging.basicConfig(
@@ -39,7 +36,9 @@ logging.info("--- アプリケーション開始 ---")
 # --------------------------------------------------------------------------
 @st.cache_data
 def scrape_ranking_data(url):
-    """Jリーグ公式サイトから順位表をスクレイピングする関数"""
+    """
+    Jリーグ公式サイトから順位表をスクレイピングする関数。
+    """
     logging.info(f"scrape_ranking_data: URL {url} からスクレイピング開始。")
     try:
         dfs = pd.read_html(url, flavor='lxml', header=0, match='順位')
@@ -58,23 +57,33 @@ def scrape_ranking_data(url):
 
 @st.cache_data
 def scrape_schedule_data(url):
-    """Jリーグ公式サイトから日程表をスクレイピングする関数"""
+    """
+    Jリーグ公式サイトから日程表をスクレイピングする関数。
+    """
     logging.info(f"scrape_schedule_data: URL {url} からスクレイピング開始。")
     try:
         dfs = pd.read_html(url, flavor='lxml', header=0, match='試合日')
+        
         if not dfs:
             logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
             return None
+            
         df = dfs[0]
         logging.info(f"日程表スクレイピング成功。DataFrameの形状: {df.shape}, カラム数: {len(df.columns)}")
+        
         expected_cols = ['大会', '試合日', 'キックオフ', 'スタジアム', 'ホーム', 'スコア', 'アウェイ', 'テレビ中継']
+        
         cols_to_keep = [col for col in expected_cols if col in df.columns]
+        
         if len(cols_to_keep) < 5:
             logging.error("抽出できた列数が少なすぎます。サイトのレイアウトが大幅に変更された可能性があります。")
             st.error("日程表の列情報が想定と異なります。サイトをご確認ください。")
             return None
+        
         df = df[cols_to_keep]
+
         return df
+        
     except Exception as e:
         logging.error(f"日程表スクレイピング中にエラーが発生: {e}")
         st.error(f"日程表データ取得エラー: {e}")
@@ -91,16 +100,21 @@ def create_point_aggregate_df(schedule_df):
 
     df = schedule_df.copy()
     
+    # スコアが「数字-数字」の形式でない行を除外
     df = df[df['スコア'].str.contains('^\d+-\d+$', na=False)]
     if df.empty:
+        # スコア形式のデータがない場合は空のDataFrameを返す
         return pd.DataFrame()
     
     df[['得点H', '得点A']] = df['スコア'].str.split('-', expand=True).astype(int)
 
+    # 試合日の前処理
+    # 例: '24/02/24(土)' -> '2024/02/24'
     df['試合日'] = df['試合日'].str.replace(r'\(.+\)', '', regex=True)
     df['試合日'] = df['試合日'].apply(lambda x: '20' + x if not x.startswith('20') else x)
     df['試合日'] = pd.to_datetime(df['試合日'], format='%Y/%m/%d')
     
+    # ホームチームのデータ集計
     home_df = df.rename(columns={'ホーム': 'チーム', 'アウェイ': '相手', '得点H': '得点', '得点A': '失点'})
     home_df['得失差'] = home_df['得点'] - home_df['失点']
     home_df['勝敗'] = home_df.apply(lambda row: '勝' if row['得点'] > row['失点'] else ('分' if row['得点'] == row['失点'] else '敗'), axis=1)
@@ -108,6 +122,7 @@ def create_point_aggregate_df(schedule_df):
     home_df['対戦相手'] = home_df['相手']
     home_df = home_df[['大会', '試合日', 'チーム', '対戦相手', '勝敗', '得点', '失点', '得失差', '勝点']]
 
+    # アウェイチームのデータ集計
     away_df = df.rename(columns={'アウェイ': 'チーム', 'ホーム': '相手', '得点A': '得点', '得点H': '失点'})
     away_df['得失差'] = away_df['得点'] - away_df['失点']
     away_df['勝敗'] = away_df.apply(lambda row: '勝' if row['得点'] > row['失点'] else ('分' if row['得点'] == row['失点'] else '敗'), axis=1)
@@ -115,8 +130,10 @@ def create_point_aggregate_df(schedule_df):
     away_df['対戦相手'] = away_df['相手']
     away_df = away_df[['大会', '試合日', 'チーム', '対戦相手', '勝敗', '得点', '失点', '得失差', '勝点']]
 
+    # ホームとアウェイのデータを結合
     pointaggregate_df = pd.concat([home_df, away_df], ignore_index=True)
 
+    # 試合日でソートし、累積勝点を計算
     pointaggregate_df = pointaggregate_df.sort_values(by=['試合日'], ascending=True)
     pointaggregate_df['累積勝点'] = pointaggregate_df.groupby(['チーム'])['勝点'].cumsum()
 
@@ -126,15 +143,15 @@ def create_point_aggregate_df(schedule_df):
 # --------------------------------------------------------------------------
 # アプリケーション本体
 # --------------------------------------------------------------------------
-try: # このtryブロックのインデントレベルが重要です
+try: # === ここがメインのtryブロックの始まりです。以降のコードは、このtryの中に入ります。 ===
     st.title('📊 Jリーグデータビューア')
 
     # --- データの取得 ---
     current_year = 2024 # ここを2024に変更！
     ranking_urls = {
         'J1': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E5%AE%89%E7%94%B0%EF%BC%AA%EF%BC%91%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={current_year}&yearId={current_year}&competitionId=651&competitionSectionId=0&search=search',
-        'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E5%AE%89%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={current_year}&yearId={current_year}&competitionId=655&competitionSectionId=0&search=search',
-        'J3': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E5%AE%89%E7%94%B0%EF%BC%AA%EF%BC%93%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={current_year}&yearId={current_year}&competitionId=657&competitionSectionId=0&search=search'
+        'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={current_year}&yearId={current_year}&competitionId=655&competitionSectionId=0&search=search',
+        'J3': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%93%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={current_year}&yearId={current_year}&competitionId=657&competitionSectionId=0&search=search'
     }
     schedule_url = f'https://data.j-league.or.jp/SFMS01/search?competition_years={current_year}&competition_frame_ids=1&competition_frame_ids=2&competition_frame_ids=3&tv_relay_station_name='
 
@@ -207,7 +224,7 @@ try: # このtryブロックのインデントレベルが重要です
         else:
             st.error("日程表データがないため、直近5試合の集計ができませんでした。")
 
-    elif data_type == "順位変動グラフ": # <= このelifが、メインのif/elifブロックに属しているはず
+    elif data_type == "順位変動グラフ":
         st.header("チーム別 順位変動グラフ")
         pointaggregate_df = create_point_aggregate_df(schedule_df)
         if not pointaggregate_df.empty:
@@ -229,12 +246,14 @@ try: # このtryブロックのインデントレベルが重要です
                 min_date = filtered_df_rank['試合日'].min()
                 max_date = filtered_df_rank['試合日'].max()
                 
+                # 最初の月曜日を計算
                 start_monday_candidate = min_date - pd.to_timedelta(min_date.weekday(), unit='D')
                 if start_monday_candidate < min_date:
                     start_monday = start_monday_candidate + pd.to_timedelta(7, unit='D')
                 else:
                     start_monday = start_monday_candidate
                 
+                # 毎週月曜日の日付範囲を生成
                 weekly_mondays = pd.date_range(start=start_monday, end=max_date + pd.to_timedelta(7, unit='D'), freq='W-MON')
                 
                 all_teams_in_selected_league = filtered_df_rank['チーム'].unique()
@@ -251,6 +270,7 @@ try: # このtryブロックのインデントレベルが重要です
                 
                 weekly_rank_data = weekly_rank_data.fillna(0)
 
+                # 週ごとの順位を計算
                 weekly_rank_df_rank = weekly_rank_data.rank(axis=1, ascending=False, method='min')
                 # --- 新しい順位算出ロジックここまで ---
                 
@@ -261,6 +281,7 @@ try: # このtryブロックのインデントレベルが重要です
                 for team in selected_teams_rank:
                     if team in weekly_rank_df_rank.columns:
                         team_rank_data = weekly_rank_df_rank[team].dropna()
+                        # ここでは `font_prop` を指定せず、デフォルトのフォントを使用
                         ax.plot(team_rank_data.index, team_rank_data.values, marker='o', linestyle='-', label=team)
                         all_plotted_rank_data.append(team_rank_data)
 
@@ -268,13 +289,16 @@ try: # このtryブロックのインデントレベルが重要です
                     num_teams_in_league = len(all_teams_in_selected_league)
                     
                     ax.set_yticks(range(1, num_teams_in_league + 1)) 
-                    ax.invert_yaxis()
+                    ax.invert_yaxis() # 順位は小さい方が上に来るように反転
                     
-                    ax.set_ylim(num_teams_in_league + 1, 0) 
+                    ax.set_ylim(num_teams_in_league + 1, 0) # y軸の範囲を設定
                 else:
                     st.warning("選択したチームの順位データがありません。")
                     st.stop()
                 
+                # 日本語タイトルとラベルは、もし文字化けするようなら、一時的に英文化するか、
+                # `fontproperties` 引数を削除してデフォルトフォントで表示させる。
+                # ここでは `font_prop` を削除したままで、matplotlibのデフォルトフォントに任せる。
                 ax.set_title(f'{selected_league_rank} 順位変動 (毎週月曜日時点)')
                 ax.set_xlabel('試合日 (毎週月曜日)')
                 ax.set_ylabel('順位')
@@ -282,16 +306,16 @@ try: # このtryブロックのインデントレベルが重要です
                 
                 ax.legend(title="チーム", loc='best')
                 
-                ax.xaxis.set_major_locator(mdates.DayLocator(interval=14)) 
-                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=14)) # 2週間ごとの目盛り
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d')) # 月/日の形式
                 
-                plt.xticks(rotation=90)
-                plt.tight_layout()
+                plt.xticks(rotation=90) # X軸のラベルを縦に
+                plt.tight_layout() # レイアウトを調整
                 
                 st.pyplot(fig)
         else:
             st.error("日程表データがないため、順位変動グラフを作成できませんでした。")
 
-except Exception as e: # このexceptブロックのインデントレベルが、tryと同じである必要があります
+except Exception as e: # === ここがメインのtryブロックに対応するexceptブロックです。 ===
     logging.critical(f"--- アプリケーションの未補足の致命的エラー: {e} ---", exc_info=True)
     st.error(f"予期せぬエラーが発生しました: {e}")
