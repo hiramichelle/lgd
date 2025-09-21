@@ -3,9 +3,10 @@ import pandas as pd
 import logging
 import requests
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
-import matplotlib.ticker as ticker
+#import matplotlib.font_manager as fm
+#import matplotlib.ticker as ticker
 import matplotlib.dates as mdates
+import japanize_matplotlib
 
 # --- 日本語フォント設定 ---
 # デプロイ環境ではフォント関連でエラーが発生しやすいので、
@@ -19,6 +20,8 @@ try:
 except Exception as e:
     st.warning(f"フォント設定中に予期せぬエラーが発生しました: {e}。デフォルトフォントを使用します。")
     plt.rcParams['axes.unicode_minus'] = False
+
+japanize_matplotlib.japanize()
 
 # --- ログ設定 ---
 logging.basicConfig(
