@@ -32,9 +32,9 @@ import matplotlib.dates as mdates # mdatesをインポート
 # === 修正案1: フォント設定全体をコメントアウト (最も安全) ===
 # デプロイ環境で日本語フォントの特定の問題を回避し、
 # アプリケーションが起動することを最優先する場合。
-plt.rcParams['font.family'] = 'sans-serif' 
-plt.rcParams['axes.unicode_minus'] = False
-font_prop = fm.FontProperties(family='sans-serif')
+#plt.rcParams['font.family'] = 'sans-serif' 
+#plt.rcParams['axes.unicode_minus'] = False
+#font_prop = fm.FontProperties(family='sans-serif')
 
 # === 修正案2: より安全なフォント設定 (グラフ部分のみで影響) ===
 # アプリケーションの起動時のエラーを回避し、グラフ描画時のみ影響を与えるようにする
