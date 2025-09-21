@@ -41,7 +41,15 @@ def scrape_ranking_data(url):
     """
     logging.info(f"scrape_ranking_data: URL {url} からスクレイピング開始。")
     try:
-        dfs = pd.read_html(url, flavor='lxml', header=0, match='順位')
+        # User-Agent を追加して、ブラウザからのアクセスに見せかける
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        
+        # requests.get でHTMLを取得し、それをpandasに渡す
+        response = requests.get(url, headers=headers, timeout=10) # タイムアウトも追加
+        response.raise_for_status() # HTTPエラーがあれば例外を発生させる
+        
+        dfs = pd.read_html(response.text, flavor='lxml', header=0, match='順位') # response.text を渡す
+        
         if not dfs:
             logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
             return None
@@ -50,8 +58,24 @@ def scrape_ranking_data(url):
         if '備考' in df.columns:
             df = df.drop(columns=['備考'])
         return df
+    except requests.exceptions.HTTPError as errh:
+        logging.error(f"HTTPエラーが発生: {errh}")
+        st.error(f"順位表データ取得エラー: HTTPエラー {errh.response.status_code}")
+        return None
+    except requests.exceptions.ConnectionError as errc:
+        logging.error(f"接続エラーが発生: {errc}")
+        st.error(f"順位表データ取得エラー: 接続に失敗しました。")
+        return None
+    except requests.exceptions.Timeout as errt:
+        logging.error(f"タイムアウトエラーが発生: {errt}")
+        st.error(f"順位表データ取得エラー: タイムアウトしました。")
+        return None
+    except requests.exceptions.RequestException as err:
+        logging.error(f"リクエストエラーが発生: {err}")
+        st.error(f"順位表データ取得エラー: 不明なリクエストエラー。")
+        return None
     except Exception as e:
-        logging.error(f"順位表スクレイピング中にエラーが発生: {e}")
+        logging.error(f"順位表スクレイピング中に予期せぬエラーが発生: {e}")
         st.error(f"順位表データ取得エラー: {e}")
         return None
 
@@ -62,7 +86,14 @@ def scrape_schedule_data(url):
     """
     logging.info(f"scrape_schedule_data: URL {url} からスクレイピング開始。")
     try:
-        dfs = pd.read_html(url, flavor='lxml', header=0, match='試合日')
+        # User-Agent を追加して、ブラウザからのアクセスに見せかける
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+
+        # requests.get でHTMLを取得し、それをpandasに渡す
+        response = requests.get(url, headers=headers, timeout=10) # タイムアウトも追加
+        response.raise_for_status() # HTTPエラーがあれば例外を発生させる
+        
+        dfs = pd.read_html(response.text, flavor='lxml', header=0, match='試合日') # response.text を渡す
         
         if not dfs:
             logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
@@ -84,11 +115,26 @@ def scrape_schedule_data(url):
 
         return df
         
+    except requests.exceptions.HTTPError as errh:
+        logging.error(f"HTTPエラーが発生: {errh}")
+        st.error(f"日程表データ取得エラー: HTTPエラー {errh.response.status_code}")
+        return None
+    except requests.exceptions.ConnectionError as errc:
+        logging.error(f"接続エラーが発生: {errc}")
+        st.error(f"日程表データ取得エラー: 接続に失敗しました。")
+        return None
+    except requests.exceptions.Timeout as errt:
+        logging.error(f"タイムアウトエラーが発生: {errt}")
+        st.error(f"日程表データ取得エラー: タイムアウトしました。")
+        return None
+    except requests.exceptions.RequestException as err:
+        logging.error(f"リクエストエラーが発生: {err}")
+        st.error(f"日程表データ取得エラー: 不明なリクエストエラー。")
+        return None
     except Exception as e:
-        logging.error(f"日程表スクレイピング中にエラーが発生: {e}")
+        logging.error(f"日程表スクレイピング中に予期せぬエラーが発生: {e}")
         st.error(f"日程表データ取得エラー: {e}")
         return None
-
 # --------------------------------------------------------------------------
 # データ加工関数
 # --------------------------------------------------------------------------
