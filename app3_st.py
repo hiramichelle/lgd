@@ -15,7 +15,7 @@ import matplotlib.dates as mdates
 # 日本語は文字化けする可能性がありますが、アプリの起動を最優先します。
 try:
     plt.rcParams['axes.unicode_minus'] = False # マイナス記号の表示は維持
-    st.info("※日本語フォントはデプロイ環境で利用できない可能性があります。グラフの日本語が文字化けする場合はご容赦ください。")
+    st.info("※グラフの日本語が文字化けあり")
 except Exception as e:
     st.warning(f"フォント設定中に予期せぬエラーが発生しました: {e}。デフォルトフォントを使用します。")
     plt.rcParams['axes.unicode_minus'] = False
