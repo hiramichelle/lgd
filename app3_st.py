@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import logging
 import requests
-import time # <-- リトライ時の待機処理のためにtimeモジュールをインポート
+import time
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm # フォント設定を手動で行う場合に備えてインポートは残しておく
+import matplotlib.font_manager as fm
 import matplotlib.ticker as ticker
 import matplotlib.dates as mdates
 
@@ -30,7 +30,7 @@ MAX_RETRIES = 3
 RETRY_DELAY = 5 # リトライ時の待機時間 (秒)
 
 # --------------------------------------------------------------------------
-# Webスクレイピング関数 (リトライ機能を追加)
+# Webスクレイピング関数 (リトライ機能付き)
 # --------------------------------------------------------------------------
 @st.cache_data
 def scrape_ranking_data(url):
@@ -211,11 +211,22 @@ try:
         }
         schedule_url = f'https://data.j-league.or.jp/SFMS01/search?competition_years={current_year}&competition_frame_ids=1&competition_frame_ids=2&competition_frame_ids=3&tv_relay_station_name='
 
-        # 順位表データの取得と結合 (4つのウェブスクレイピング実行)
+        # 順位表データの取得
         ranking_dfs = {league: scrape_ranking_data(url) for league, url in ranking_urls.items()}
+
+        # 順位表データの結合 (★★★ここを修正★★★)
+        non_none_ranking_dfs = []
         for league, df in ranking_dfs.items():
-            if df is not None: df['大会'] = league
-        combined_ranking_df = pd.concat([df for df in ranking_dfs.values() if df is not None], ignore_index=True)
+            if df is not None:
+                df['大会'] = league
+                non_none_ranking_dfs.append(df)
+        
+        if non_none_ranking_dfs:
+            combined_ranking_df = pd.concat(non_none_ranking_dfs, ignore_index=True)
+        else:
+            # 全て失敗した場合は、空のDataFrameを初期化してクラッシュを防ぐ
+            logging.warning("全てのランキングデータ取得に失敗しました。combined_ranking_dfを空で初期化します。")
+            combined_ranking_df = pd.DataFrame(columns=['順位', 'チーム', '勝点', '大会']) # 必要なカラムを仮定義
 
         # 日程表データの取得 (1つのウェブスクレイピング実行)
         schedule_df = scrape_schedule_data(schedule_url)
@@ -290,7 +301,7 @@ if data_type == "順位表":
         filtered_df = combined_ranking_df[combined_ranking_df['大会'] == selected_league].drop(columns=['大会'])
         st.dataframe(filtered_df)
     else:
-        st.error("順位表データが正常に取得できませんでした。")
+        st.error("順位表データは外部サーバーの障害により取得できませんでした。時間を置いて再度お試しください。")
 
 elif data_type == "日程表":
     st.header(f"{selected_league} {selected_team if selected_team else ''} 試合日程")
