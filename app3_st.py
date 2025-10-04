@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import logging
 import requests
+import time # <-- リトライ時の待機処理のためにtimeモジュールをインポート
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm # フォント設定を手動で行う場合に備えてインポートは残しておく
 import matplotlib.ticker as ticker
@@ -24,84 +25,121 @@ logging.basicConfig(
 
 logging.info("--- アプリケーション開始 ---")
 
+# --- 定数設定 ---
+MAX_RETRIES = 3
+RETRY_DELAY = 5 # リトライ時の待機時間 (秒)
+
 # --------------------------------------------------------------------------
-# Webスクレイピング関数 (変更なし)
+# Webスクレイピング関数 (リトライ機能を追加)
 # --------------------------------------------------------------------------
 @st.cache_data
 def scrape_ranking_data(url):
     """
-    Jリーグ公式サイトから順位表をスクレイピングする関数。
+    Jリーグ公式サイトから順位表をスクレイピングする関数。（リトライ機能付き）
     """
     logging.info(f"scrape_ranking_data: URL {url} からスクレイピング開始。")
-    try:
-        # User-Agent を追加して、ブラウザからのアクセスに見せかける
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            # requests.get でHTMLを取得し、それをpandasに渡す
+            response = requests.get(url, headers=headers, timeout=30) 
+            response.raise_for_status() # HTTPエラーがあれば例外を発生させる
+            
+            # 順位表のヘッダーが正しく取れない場合があるため、'順位'を含むテーブルをマッチ
+            dfs = pd.read_html(response.text, flavor='lxml', header=0, match='順位') 
+            
+            if not dfs:
+                logging.warning(f"read_htmlがテーブルを検出できませんでした。URL: {url}")
+                return None
+            
+            df = dfs[0]
+            logging.info(f"順位表スクレイピング成功 (試行 {attempt} 回目)。DataFrameの形状: {df.shape}")
+            if '備考' in df.columns:
+                df = df.drop(columns=['備考'])
+            return df
         
-        # requests.get でHTMLを取得し、それをpandasに渡す
-        response = requests.get(url, headers=headers, timeout=30) # タイムアウトを少し長く設定
-        response.raise_for_status() # HTTPエラーがあれば例外を発生させる
-        
-        # 順位表のヘッダーが正しく取れない場合があるため、'順位'を含むテーブルをマッチ
-        dfs = pd.read_html(response.text, flavor='lxml', header=0, match='順位') 
-        
-        if not dfs:
-            logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
+        except requests.exceptions.HTTPError as errh:
+            # 5xx エラーの場合のみリトライを試みる
+            if 500 <= errh.response.status_code < 600 and attempt < MAX_RETRIES:
+                logging.warning(f"HTTP 5xx エラーが発生: {errh}。{RETRY_DELAY}秒後にリトライします (試行 {attempt}/{MAX_RETRIES})。")
+                time.sleep(RETRY_DELAY)
+                continue
+            logging.error(f"HTTPエラーが発生 (最終試行): {errh}")
             return None
-        df = dfs[0]
-        logging.info(f"順位表スクレイピング成功。DataFrameの形状: {df.shape}")
-        if '備考' in df.columns:
-            df = df.drop(columns=['備考'])
-        return df
-    except requests.exceptions.HTTPError as errh:
-        logging.error(f"HTTPエラーが発生: {errh}")
-        # st.errorはここでは出さず、メインロジックで一括処理
-        return None
-    except requests.exceptions.RequestException as err:
-        logging.error(f"リクエストエラーが発生: {err}")
-        return None
-    except Exception as e:
-        logging.error(f"順位表スクレイピング中に予期せぬエラーが発生: {e}")
-        return None
+        
+        except requests.exceptions.RequestException as err:
+            # タイムアウトや接続エラーの場合
+            if attempt < MAX_RETRIES:
+                logging.warning(f"リクエストエラーが発生: {err}。{RETRY_DELAY}秒後にリトライします (試行 {attempt}/{MAX_RETRIES})。")
+                time.sleep(RETRY_DELAY)
+                continue
+            logging.error(f"リクエストエラーが発生 (最終試行): {err}")
+            return None
+            
+        except Exception as e:
+            logging.error(f"順位表スクレイピング中に予期せぬエラーが発生: {e}")
+            return None
+    
+    return None # 最大リトライ回数を超えた場合
 
 @st.cache_data
 def scrape_schedule_data(url):
     """
-    Jリーグ公式サイトから日程表をスクレイピングする関数。
+    Jリーグ公式サイトから日程表をスクレイピングする関数。（リトライ機能付き）
     """
     logging.info(f"scrape_schedule_data: URL {url} からスクレイピング開始。")
-    try:
-        # User-Agent を追加して、ブラウザからのアクセスに見せかける
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
 
-        # requests.get でHTMLを取得し、それをpandasに渡す
-        response = requests.get(url, headers=headers, timeout=15) # タイムアウトも追加
-        response.raise_for_status() # HTTPエラーがあれば例外を発生させる
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            # requests.get でHTMLを取得し、それをpandasに渡す
+            response = requests.get(url, headers=headers, timeout=30) # タイムアウトは30秒のまま
+            response.raise_for_status() # HTTPエラーがあれば例外を発生させる
+            
+            dfs = pd.read_html(response.text, flavor='lxml', header=0, match='試合日') 
+            
+            if not dfs:
+                logging.warning(f"read_htmlがテーブルを検出できませんでした。URL: {url}")
+                return None
+                
+            df = dfs[0]
+            logging.info(f"日程表スクレイピング成功 (試行 {attempt} 回目)。DataFrameの形状: {df.shape}, カラム数: {len(df.columns)}")
+            
+            expected_cols = ['大会', '試合日', 'キックオフ', 'スタジアム', 'ホーム', 'スコア', 'アウェイ', 'テレビ中継']
+            cols_to_keep = [col for col in expected_cols if col in df.columns]
+            
+            if len(cols_to_keep) < 5:
+                logging.error("抽出できた列数が少なすぎます。サイトのレイアウトが大幅に変更された可能性があります。")
+                return None
+                
+            df = df[cols_to_keep]
+            return df
+            
+        except requests.exceptions.HTTPError as errh:
+            # 5xx エラーの場合のみリトライを試みる
+            if 500 <= errh.response.status_code < 600 and attempt < MAX_RETRIES:
+                logging.warning(f"HTTP 5xx エラーが発生: {errh}。{RETRY_DELAY}秒後にリトライします (試行 {attempt}/{MAX_RETRIES})。")
+                time.sleep(RETRY_DELAY)
+                continue
+            logging.error(f"HTTPエラーが発生 (最終試行): {errh}")
+            return None
         
-        dfs = pd.read_html(response.text, flavor='lxml', header=0, match='試合日') 
-        
-        if not dfs:
-            logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
+        except requests.exceptions.RequestException as err:
+            # タイムアウトや接続エラーの場合
+            if attempt < MAX_RETRIES:
+                logging.warning(f"リクエストエラーが発生: {err}。{RETRY_DELAY}秒後にリトライします (試行 {attempt}/{MAX_RETRIES})。")
+                time.sleep(RETRY_DELAY)
+                continue
+            logging.error(f"リクエストエラーが発生 (最終試行): {err}")
             return None
             
-        df = dfs[0]
-        logging.info(f"日程表スクレイピング成功。DataFrameの形状: {df.shape}, カラム数: {len(df.columns)}")
-        
-        expected_cols = ['大会', '試合日', 'キックオフ', 'スタジアム', 'ホーム', 'スコア', 'アウェイ', 'テレビ中継']
-        cols_to_keep = [col for col in expected_cols if col in df.columns]
-        
-        if len(cols_to_keep) < 5:
-            logging.error("抽出できた列数が少なすぎます。サイトのレイアウトが大幅に変更された可能性があります。")
+        except Exception as e:
+            logging.error(f"日程表スクレイピング中に予期せぬエラーが発生: {e}")
             return None
             
-        df = df[cols_to_keep]
-        return df
-        
-    except requests.exceptions.RequestException as err:
-        logging.error(f"リクエストエラーが発生: {err}")
-        return None
-    except Exception as e:
-        logging.error(f"日程表スクレイピング中に予期せぬエラーが発生: {e}")
-        return None
+    return None # 最大リトライ回数を超えた場合
+
 # --------------------------------------------------------------------------
 # データ加工関数 (変更なし)
 # --------------------------------------------------------------------------
