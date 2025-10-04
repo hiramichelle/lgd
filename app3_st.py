@@ -38,7 +38,7 @@ def scrape_ranking_data(url):
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         
         # requests.get でHTMLを取得し、それをpandasに渡す
-        response = requests.get(url, headers=headers, timeout=15) # タイムアウトを少し長く設定
+        response = requests.get(url, headers=headers, timeout=30) # タイムアウトを少し長く設定
         response.raise_for_status() # HTTPエラーがあれば例外を発生させる
         
         # 順位表のヘッダーが正しく取れない場合があるため、'順位'を含むテーブルをマッチ
