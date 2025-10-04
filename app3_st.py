@@ -7,15 +7,11 @@ import matplotlib.font_manager as fm # フォント設定を手動で行う場�
 import matplotlib.ticker as ticker
 import matplotlib.dates as mdates
 
-# lxmlはpandas.read_htmlのflavor='lxml'で使用されるため、直接インポートは不要
-
 # --- 日本語フォント設定 ---
-# japanize-matplotlibがPython 3.12+環境で問題があるため、
-# ここでは日本語フォントの設定は行わず、matplotlibのデフォルトフォントを使用します。
-# 日本語は文字化けする可能性がありますが、アプリの起動を最優先します。
+# 現状では日本語フォントの設定は行わず、matplotlibのデフォルトフォントを使用します。
 try:
     plt.rcParams['axes.unicode_minus'] = False # マイナス記号の表示は維持
-    st.info("※グラフの日本語が文字化けあり")
+    st.info("※グラフの日本語は文字化けする可能性があります。")
 except Exception as e:
     st.warning(f"フォント設定中に予期せぬエラーが発生しました: {e}。デフォルトフォントを使用します。")
     plt.rcParams['axes.unicode_minus'] = False
@@ -24,9 +20,6 @@ except Exception as e:
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    # デプロイ環境ではファイルへの出力は不要、標準出力にログを出す
-    # filename='app.log',
-    # filemode='w'
 )
 
 logging.info("--- アプリケーション開始 ---")
@@ -48,7 +41,8 @@ def scrape_ranking_data(url):
         response = requests.get(url, headers=headers, timeout=10) # タイムアウトも追加
         response.raise_for_status() # HTTPエラーがあれば例外を発生させる
         
-        dfs = pd.read_html(response.text, flavor='lxml', header=0, match='順位') # response.text を渡す
+        # 順位表のヘッダーが正しく取れない場合があるため、'順位'を含むテーブルをマッチ
+        dfs = pd.read_html(response.text, flavor='lxml', header=0, match='順位') 
         
         if not dfs:
             logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
@@ -62,17 +56,9 @@ def scrape_ranking_data(url):
         logging.error(f"HTTPエラーが発生: {errh}")
         st.error(f"順位表データ取得エラー: HTTPエラー {errh.response.status_code}")
         return None
-    except requests.exceptions.ConnectionError as errc:
-        logging.error(f"接続エラーが発生: {errc}")
-        st.error(f"順位表データ取得エラー: 接続に失敗しました。")
-        return None
-    except requests.exceptions.Timeout as errt:
-        logging.error(f"タイムアウトエラーが発生: {errt}")
-        st.error(f"順位表データ取得エラー: タイムアウトしました。")
-        return None
     except requests.exceptions.RequestException as err:
         logging.error(f"リクエストエラーが発生: {err}")
-        st.error(f"順位表データ取得エラー: 不明なリクエストエラー。")
+        st.error(f"順位表データ取得エラー: リクエストエラー。")
         return None
     except Exception as e:
         logging.error(f"順位表スクレイピング中に予期せぬエラーが発生: {e}")
@@ -93,7 +79,7 @@ def scrape_schedule_data(url):
         response = requests.get(url, headers=headers, timeout=10) # タイムアウトも追加
         response.raise_for_status() # HTTPエラーがあれば例外を発生させる
         
-        dfs = pd.read_html(response.text, flavor='lxml', header=0, match='試合日') # response.text を渡す
+        dfs = pd.read_html(response.text, flavor='lxml', header=0, match='試合日') 
         
         if not dfs:
             logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
@@ -110,26 +96,14 @@ def scrape_schedule_data(url):
             logging.error("抽出できた列数が少なすぎます。サイトのレイアウトが大幅に変更された可能性があります。")
             st.error("日程表の列情報が想定と異なります。サイトをご確認ください。")
             return None
-        
+            
         df = df[cols_to_keep]
 
         return df
         
-    except requests.exceptions.HTTPError as errh:
-        logging.error(f"HTTPエラーが発生: {errh}")
-        st.error(f"日程表データ取得エラー: HTTPエラー {errh.response.status_code}")
-        return None
-    except requests.exceptions.ConnectionError as errc:
-        logging.error(f"接続エラーが発生: {errc}")
-        st.error(f"日程表データ取得エラー: 接続に失敗しました。")
-        return None
-    except requests.exceptions.Timeout as errt:
-        logging.error(f"タイムアウトエラーが発生: {errt}")
-        st.error(f"日程表データ取得エラー: タイムアウトしました。")
-        return None
     except requests.exceptions.RequestException as err:
         logging.error(f"リクエストエラーが発生: {err}")
-        st.error(f"日程表データ取得エラー: 不明なリクエストエラー。")
+        st.error(f"日程表データ取得エラー: リクエストエラー。")
         return None
     except Exception as e:
         logging.error(f"日程表スクレイピング中に予期せぬエラーが発生: {e}")
@@ -157,8 +131,15 @@ def create_point_aggregate_df(schedule_df):
     # 試合日の前処理
     # 例: '24/02/24(土)' -> '2024/02/24'
     df['試合日'] = df['試合日'].str.replace(r'\(.+\)', '', regex=True)
+    # 年が2桁の場合は'20'を付与
     df['試合日'] = df['試合日'].apply(lambda x: '20' + x if not x.startswith('20') else x)
-    df['試合日'] = pd.to_datetime(df['試合日'], format='%Y/%m/%d')
+    # 日付形式の変換でエラーが出た場合を考慮
+    try:
+        df['試合日'] = pd.to_datetime(df['試合日'], format='%Y/%m/%d')
+    except ValueError as e:
+        logging.error(f"日付変換エラー: {e}")
+        st.error("日程表の日付フォーマットに問題があり、集計データを作成できませんでした。")
+        return pd.DataFrame()
     
     # ホームチームのデータ集計
     home_df = df.rename(columns={'ホーム': 'チーム', 'アウェイ': '相手', '得点H': '得点', '得点A': '失点'})
@@ -189,11 +170,11 @@ def create_point_aggregate_df(schedule_df):
 # --------------------------------------------------------------------------
 # アプリケーション本体
 # --------------------------------------------------------------------------
-try: # === ここがメインのtryブロックの始まりです。以降のコードは、このtryの中に入ります。 ===
+try: # === ここがメインのtryブロックの始まりです。 ===
     st.title('📊 Jリーグデータビューア')
 
     # --- データの取得 ---
-    current_year = 2025 # ここを2024に変更！
+    current_year = 2024 # データを取得しやすいよう、2025から2024に変更しました。
     ranking_urls = {
         'J1': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E5%AE%89%E7%94%B0%EF%BC%AA%EF%BC%91%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={current_year}&yearId={current_year}&competitionId=651&competitionSectionId=0&search=search',
         'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={current_year}&yearId={current_year}&competitionId=655&competitionSectionId=0&search=search',
@@ -208,87 +189,121 @@ try: # === ここがメインのtryブロックの始まりです。以降のコ
 
     schedule_df = scrape_schedule_data(schedule_url)
 
-    # --- サイドバーに選択肢を配置 ---
+    # 累積勝点データフレームの作成 (グラフ表示で使用)
+    pointaggregate_df = create_point_aggregate_df(schedule_df)
+
+    # --- サイドバーに大会・チーム選択を上位レイヤーに配置 ---
     with st.sidebar:
-        st.header("表示データ選択")
-        data_type = st.radio("表示するデータを選択してください:", ("順位表", "日程表", "直近5試合", "順位変動グラフ"))
+        st.header("ステップ 1: 大会とチーム選択")
+
+        # 1. 大会選択 (ランキングと日程表の両方から存在する大会を抽出)
+        all_available_leagues = set()
+        if not combined_ranking_df.empty:
+            all_available_leagues.update(combined_ranking_df['大会'].unique())
+        if schedule_df is not None and not schedule_df.empty:
+            all_available_leagues.update(schedule_df['大会'].unique())
+            
+        if not all_available_leagues:
+            st.error("データが取得できませんでした。大会選択に進めません。")
+            st.stop() # データがない場合はアプリの実行を停止
+        
+        league_options = sorted(list(all_available_leagues))
+        selected_league = st.selectbox(
+            '表示したい大会を選択してください:', 
+            league_options, 
+            key='global_league_selectbox'
+        )
+
+        # 2. チーム選択 (選択された大会の日程表データからチームを抽出)
+        team_options = []
+        selected_team = None
+        if schedule_df is not None and not schedule_df.empty:
+            filtered_by_league_schedule = schedule_df[schedule_df['大会'] == selected_league]
+            if not filtered_by_league_schedule.empty:
+                all_teams_in_league = pd.concat([filtered_by_league_schedule['ホーム'], filtered_by_league_schedule['アウェイ']]).unique()
+                team_options = sorted(all_teams_in_league)
+            
+                if team_options:
+                    selected_team = st.selectbox(
+                        '基準となるチームを選択してください:', 
+                        team_options, 
+                        key='global_team_selectbox'
+                    )
+            
+        if not team_options:
+            st.warning("この大会の日程データがないため、チーム選択はスキップされます。")
+        
+
+        st.header("ステップ 2: 表示データ選択")
+        data_type = st.radio(
+            "表示するデータを選択してください:", 
+            ("順位表", "日程表", "直近5試合", "順位変動グラフ")
+        )
 
     # --- メイン画面の表示ロジック ---
     if data_type == "順位表":
-        st.header("Jリーグ 順位表")
+        st.header(f"{selected_league} 順位表")
         if not combined_ranking_df.empty:
-            with st.sidebar:
-                st.header("順位表オプション")
-                league_options = combined_ranking_df['大会'].unique()
-                selected_league = st.selectbox('表示したい大会を選択してください:', league_options, key='ranking_selectbox')
+            # グローバルで選択された大会でフィルタリング
             filtered_df = combined_ranking_df[combined_ranking_df['大会'] == selected_league].drop(columns=['大会'])
             st.dataframe(filtered_df)
         else:
             st.error("順位表データが正常に取得できませんでした。")
 
     elif data_type == "日程表":
-        st.header("Jリーグ 試合日程")
-        if schedule_df is not None and not schedule_df.empty:
-            with st.sidebar:
-                st.header("日程表オプション")
-                
-                league_options = sorted(schedule_df['大会'].unique())
-                selected_league_schedule = st.selectbox('表示したい大会を選択してください:', league_options, key='schedule_league_selectbox')
-                filtered_by_league = schedule_df[schedule_df['大会'] == selected_league_schedule]
-                all_teams_in_league = pd.concat([filtered_by_league['ホーム'], filtered_by_league['アウェイ']]).unique()
-                team_options = sorted(all_teams_in_league)
-                selected_team = st.selectbox('表示したいチームを選択してください:', team_options, key='schedule_team_selectbox')
-            
+        st.header(f"{selected_league} {selected_team if selected_team else ''} 試合日程")
+        if schedule_df is not None and not schedule_df.empty and selected_team:
+            # グローバルで選択された大会とチームでフィルタリング
             team_filter = (schedule_df['ホーム'] == selected_team) | (schedule_df['アウェイ'] == selected_team)
-            final_filtered_df = schedule_df[(schedule_df['大会'] == selected_league_schedule) & team_filter]
+            final_filtered_df = schedule_df[(schedule_df['大会'] == selected_league) & team_filter]
             st.dataframe(final_filtered_df)
+        elif selected_team is None:
+             st.warning("チームデータがないため、日程表を表示できません。")
         else:
             st.error("日程表データが正常に取得できませんでした。")
 
     elif data_type == "直近5試合":
-        st.header("チーム別 直近5試合結果")
-        pointaggregate_df = create_point_aggregate_df(schedule_df)
-        if not pointaggregate_df.empty:
-            with st.sidebar:
-                st.header("直近5試合オプション")
+        st.header(f"{selected_league} {selected_team if selected_team else ''} 直近5試合結果")
+        if not pointaggregate_df.empty and selected_team:
+            # グローバルで選択された大会とチームでフィルタリング
+            team_results = pointaggregate_df[(pointaggregate_df['大会'] == selected_league) & (pointaggregate_df['チーム'] == selected_team)]
+            
+            if team_results.empty:
+                 st.info(f"チーム {selected_team} の試合結果データがまだありません。")
+            else:
+                # 最新の5試合を取得
+                recent_5_games = team_results.sort_values(by='試合日', ascending=False).head(5)
+                recent_5_games = recent_5_games.sort_values(by='試合日', ascending=True) # 表示のために再度昇順にソート
+                recent_5_games['試合日'] = recent_5_games['試合日'].dt.strftime('%y%m%d')
                 
-                league_options_aggregate = sorted(pointaggregate_df['大会'].unique())
-                selected_league_aggregate = st.selectbox('大会を選択してください:', league_options_aggregate, key='aggregate_league_selectbox')
-
-                filtered_df_aggregate = pointaggregate_df[pointaggregate_df['大会'] == selected_league_aggregate]
-                team_options_aggregate = sorted(filtered_df_aggregate['チーム'].unique())
-                
-                selected_team_aggregate = st.selectbox('チームを選択してください:', team_options_aggregate, key='aggregate_team_selectbox')
-            
-            team_results = pointaggregate_df[(pointaggregate_df['大会'] == selected_league_aggregate) & (pointaggregate_df['チーム'] == selected_team_aggregate)]
-            recent_5_games = team_results.sort_values(by='試合日', ascending=False).head(5)
-            recent_5_games = recent_5_games.sort_values(by='試合日', ascending=True) # 表示のために再度昇順にソート
-            
-            recent_5_games['試合日'] = recent_5_games['試合日'].dt.strftime('%y%m%d')
-            
-            st.dataframe(recent_5_games)
+                st.dataframe(recent_5_games[['試合日', '対戦相手', '勝敗', '得点', '失点', '勝点']])
+        elif selected_team is None:
+             st.warning("チームデータがないため、直近5試合の結果を表示できません。")
         else:
             st.error("日程表データがないため、直近5試合の集計ができませんでした。")
 
     elif data_type == "順位変動グラフ":
-        st.header("チーム別 順位変動グラフ")
-        pointaggregate_df = create_point_aggregate_df(schedule_df)
+        st.header(f"{selected_league} 順位変動グラフ")
         if not pointaggregate_df.empty:
-            with st.sidebar:
-                st.header("順位変動グラフオプション")
-                
-                league_options_rank = sorted(pointaggregate_df['大会'].unique())
-                selected_league_rank = st.selectbox('大会を選択してください:', league_options_rank, key='rank_league_selectbox')
-
-                filtered_df_rank = pointaggregate_df[pointaggregate_df['大会'] == selected_league_rank]
-                team_options_rank = sorted(filtered_df_rank['チーム'].unique())
-                
-                selected_teams_rank = st.multiselect('チームを選択してください (複数選択可):', team_options_rank, default=team_options_rank[:1], key='rank_team_multiselect')
             
+            # --- グラフ表示用のチームマルチセレクトをここで定義 ---
+            # pointaggregate_dfから選択されたリーグのチームオプションを再取得
+            filtered_df_rank = pointaggregate_df[pointaggregate_df['大会'] == selected_league]
+            team_options_rank = sorted(filtered_df_rank['チーム'].unique())
+            
+            # グラフ用のチーム選択（複数選択）
+            selected_teams_rank = st.multiselect(
+                'グラフに表示するチームを選択してください (複数選択可):', 
+                team_options_rank, 
+                default=[selected_team] if selected_team in team_options_rank else team_options_rank[:1], 
+                key='rank_team_multiselect'
+            )
+            # --- グラフ表示用のチームマルチセレクトここまで ---
+
             if not selected_teams_rank:
                 st.warning("表示するチームを選択してください。")
             else:
-                # --- ここから新しい順位算出ロジック ---
+                # 順位算出ロジックは変更なし
                 min_date = filtered_df_rank['試合日'].min()
                 max_date = filtered_df_rank['試合日'].max()
                 
@@ -318,8 +333,8 @@ try: # === ここがメインのtryブロックの始まりです。以降のコ
 
                 # 週ごとの順位を計算
                 weekly_rank_df_rank = weekly_rank_data.rank(axis=1, ascending=False, method='min')
-                # --- 新しい順位算出ロジックここまで ---
                 
+                # --- グラフ描画 ---
                 fig, ax = plt.subplots(figsize=(12, 8))
                 
                 all_plotted_rank_data = []
@@ -327,7 +342,6 @@ try: # === ここがメインのtryブロックの始まりです。以降のコ
                 for team in selected_teams_rank:
                     if team in weekly_rank_df_rank.columns:
                         team_rank_data = weekly_rank_df_rank[team].dropna()
-                        # ここでは `font_prop` を指定せず、デフォルトのフォントを使用
                         ax.plot(team_rank_data.index, team_rank_data.values, marker='o', linestyle='-', label=team)
                         all_plotted_rank_data.append(team_rank_data)
 
@@ -337,15 +351,13 @@ try: # === ここがメインのtryブロックの始まりです。以降のコ
                     ax.set_yticks(range(1, num_teams_in_league + 1)) 
                     ax.invert_yaxis() # 順位は小さい方が上に来るように反転
                     
-                    ax.set_ylim(num_teams_in_league + 1, 0) # y軸の範囲を設定
+                    # y軸の範囲を調整（順位の最大値まで）
+                    ax.set_ylim(num_teams_in_league + 1, 0)
                 else:
                     st.warning("選択したチームの順位データがありません。")
                     st.stop()
                 
-                # 日本語タイトルとラベルは、もし文字化けするようなら、一時的に英文化するか、
-                # `fontproperties` 引数を削除してデフォルトフォントで表示させる。
-                # ここでは `font_prop` を削除したままで、matplotlibのデフォルトフォントに任せる。
-                ax.set_title(f'{selected_league_rank} 順位変動 (毎週月曜日時点)')
+                ax.set_title(f'{selected_league} 順位変動 (毎週月曜日時点)')
                 ax.set_xlabel('試合日 (毎週月曜日)')
                 ax.set_ylabel('順位')
                 ax.grid(True)
