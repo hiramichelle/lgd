@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
 import re
-import unicodedata 
+import unicodedata
 from io import StringIO 
 import numpy as np 
 
