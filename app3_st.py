@@ -734,9 +734,9 @@ try:
                 
                 # 予測実行 (引数を全て渡すように補完)
                 result, detail, color = predict_match_outcome(
-                    home_team, 
-                    away_team, 
-                    selected_league_predictor, 
+                    home_team,
+                    away_team,
+                    selected_league_predictor,
                     st.session_state.current_year,
                     st.session_state.combined_ranking_df,
                     st.session_state.pointaggregate_df
