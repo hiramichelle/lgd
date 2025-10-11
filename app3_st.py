@@ -251,7 +251,7 @@ def parse_match_date(date_str, year):
     cleaned_date_str = re.sub(r'\(.*?\)', '', date_str).strip()
     
     # 2. 時刻やその他のノイズを削除し、日付部分 'YY/MM/DD' のみを取得
-    match = re.search(r'(\d{1,2}/\d{1,2}/\d{1,2})', cleaned_date_str) 
+    match = re.search(r'(\d{1,2}/\d{1,2}/\d{1,2})', cleaned_date_str)
     
     if match:
         date_part = match.group(1).strip()
