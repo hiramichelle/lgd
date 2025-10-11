@@ -11,41 +11,59 @@ class RankingDataProcessor:
     """
     過去のシーズンデータから、指定された試合日（または節）直前の
     正確な順位表と累積データを取得・計算するプロセッサ。
+    
+    訓練対象はJ3のみであるため、calculate_featuresはJ3のデータのみを使用します。
     """
-    # J3リーグのCompetition IDを年ごとに定義。
-    # このIDはJリーグサイトのURLパラメータに必須です。
-    J3_COMPETITION_IDS = {
-        2025: 657,
-        2024: 657, # ご提供いただいたURIリストに基づく
-        2023: 650, # 仮の値 (要確認: 正しいIDに置き換えてください)
-        2022: 644, # 仮の値 (要確認: 正しいIDに置き換えてください)
-        # 必要に応じて過去の年度を追記
+    # ユーザー提供のURIから抽出した、J1, J2, J3の正確なCompetition ID
+    COMPETITION_IDS = {
+        'J1': {
+            2025: 651,
+            2024: 589,
+            2023: 554,
+            2022: 521,
+        },
+        'J2': {
+            2025: 655,
+            2024: 590,
+            2023: 555,
+            2022: 522,
+        },
+        'J3': {
+            2025: 657,
+            2024: 591,
+            2023: 556,
+            2022: 523,
+        }
     }
     
+    # 訓練対象のリーグ
+    TARGET_LEAGUE = 'J3' 
+
     def __init__(self, firebase_config, app_id):
         """
         プロセッサの初期化。アプリケーションIDとFirebase設定を保持。
         """
         self.app_id = app_id
+        # Firebase設定をJSONとしてロード
         self.firebase_config = json.loads(firebase_config)
         # 順位表データをキャッシュし、同じ節への不要なリクエストを防ぐ
         self.ranking_cache = {} # {year: {match_day: {'チーム名': data}}}
-        # print(f"RankingDataProcessor initialized for app: {self.app_id}") # デバッグログ抑制
 
-    def _get_j3_competition_id(self, year: int) -> int:
-        """ J3のCompetition IDを年ごとに返す """
-        return self.J3_COMPETITION_IDS.get(year, 0)
+    def _get_competition_id(self, league: str, year: int) -> int:
+        """ 指定されたリーグと年のCompetition IDを返す """
+        return self.COMPETITION_IDS.get(league, {}).get(year, 0)
 
-    def _fetch_past_ranking_data(self, year: int, match_day: int):
+    def _fetch_past_ranking_data(self, league: str, year: int, match_day: int):
         """
-        Jリーグ公式サイトから、指定された年と節の『終了時点』の順位表HTMLを取得し、パースする。
+        Jリーグ公式サイトから、指定されたリーグ、年、節の『終了時点』の順位表HTMLを取得し、パースする。
         """
-        comp_id = self._get_j3_competition_id(year)
+        comp_id = self._get_competition_id(league, year)
         if comp_id == 0:
-            print(f"ERROR: {year}年のJ3 Competition IDが未定義です。")
+            print(f"ERROR: {year}年の{league} Competition IDが未定義です。")
             return None
 
-        # 特定の年、節、J3 IDを指定したURL
+        # 特定の年、節、IDを指定したURL
+        # competitionSectionId={match_day} と competitionId={comp_id} で正確な過去データを指定
         url = (
             "https://data.j-league.or.jp/SFRT01/search"
             f"?competitionSectionId={match_day}"
@@ -54,6 +72,7 @@ class RankingDataProcessor:
         )
         
         try:
+            # Webサイトからデータを取得
             response = requests.get(url, timeout=10)
             response.raise_for_status() 
             
@@ -62,7 +81,7 @@ class RankingDataProcessor:
             ranking_table = soup.find('table', class_='rankingTable')
             
             if not ranking_table:
-                print(f"WARN: {year}年 第{match_day}節の順位表テーブルが見つかりませんでした。URL: {url}")
+                print(f"WARN: {year}年 {league} 第{match_day}節の順位表テーブルが見つかりませんでした。URL: {url}")
                 return None
 
             team_ranking_data = {}
@@ -89,13 +108,13 @@ class RankingDataProcessor:
                         continue
                         
             if not team_ranking_data:
-                print(f"WARN: {year}年 第{match_day}節で有効なチームデータが取得できませんでした。")
+                print(f"WARN: {year}年 {league} 第{match_day}節で有効なチームデータが取得できませんでした。")
 
             return team_ranking_data
 
         except requests.exceptions.HTTPError as e:
             print(f"順位表データ取得エラー (HTTP {response.status_code}): {e}")
-            print(f"→ Competition IDまたは節数が間違っている可能性があります。確認してください。")
+            print(f"→ Competition ID: {comp_id} または節数: {match_day} が間違っている可能性があります。")
             return None
         except requests.exceptions.RequestException as e:
             print(f"順位表データ取得エラー (接続): {e}")
@@ -103,8 +122,9 @@ class RankingDataProcessor:
 
     def get_ranking_data_before_match(self, year: int, match_day: int, team_name: str):
         """
-        指定された試合の前節終了時点の順位データを取得する。
+        [J3専用] 指定された試合の前節終了時点のJ3順位データを取得する。
         """
+        league = self.TARGET_LEAGUE
         previous_match_day = max(0, match_day - 1)
         
         # キャッシュの初期化
@@ -115,15 +135,15 @@ class RankingDataProcessor:
         if previous_match_day not in self.ranking_cache[year]:
             if previous_match_day == 0:
                 # 0節（シーズン開始前）は初期値として設定
-                data = {'rank': 21, 'total_goal_diff': 0, 'points': 0}
+                data = {'rank': 21, 'total_goal_diff': 0, 'points': 0} # J3は最大20チームだが安全を見て21
                 self.ranking_cache[year][previous_match_day] = data
             else:
-                # 試合前節のデータをWebから取得
-                data = self._fetch_past_ranking_data(year, previous_match_day)
+                # 試合前節のデータをWebから取得 (J3データのみを使用)
+                data = self._fetch_past_ranking_data(league, year, previous_match_day)
                 if data is None:
                     # データ取得失敗時は、空の辞書をキャッシュして再試行を防ぐ
                     self.ranking_cache[year][previous_match_day] = {}
-                    print(f"WARN: {year}年 第{previous_match_day}節の順位データ取得失敗。最下位/得失点差0として計算を継続します。")
+                    print(f"WARN: {year}年 {league} 第{previous_match_day}節の順位データ取得失敗。最悪値で計算を継続します。")
                 else:
                     self.ranking_cache[year][previous_match_day] = data
         
@@ -197,7 +217,7 @@ if __name__ == '__main__':
 
     # 3. 特徴量の計算
     # get_ranking_data_before_match() の内部で、第15節終了時点のデータが使われる
-    print("\n--- 特徴量計算の実行 ---")
+    print("\n--- 特徴量計算の実行 ---\n")
     features = processor.calculate_features(
         year=match_year,
         match_day=match_day,
@@ -208,7 +228,7 @@ if __name__ == '__main__':
     )
 
     if features:
-        print("\n--- 計算された特徴量 ---")
+        print("--- 計算された特徴量 ---")
         for key, value in features.items():
             print(f"{key}: {value}")
     else:
