@@ -65,7 +65,7 @@ LEAGUE_NAME_MAPPING = {
 }
 
 # --------------------------------------------------------------------------
-# チーム名マスタの定義と初期化 (J2/J3の表記揺れを大幅に拡張 & 栃木の揺れ対応)
+# チーム名マスタの定義と初期化 (変更なし)
 # --------------------------------------------------------------------------
 # キー: 略称や揺れのある表記 / 値: 正規名称
 TEAM_NAME_MAPPING = {
@@ -190,7 +190,7 @@ def scrape_ranking_data(url):
         
         # --- チーム名正規化の適用 (ランキング) ---
         if 'チーム' in df.columns:
-            df['チーム'] = df['チーム'].apply(normalize_j_name)
+            df.loc[:, 'チーム'] = df['チーム'].apply(normalize_j_name)
         # ---------------------------------------
             
         return df
@@ -223,7 +223,6 @@ def scrape_schedule_data(url):
 
         # --- 大会名、チーム名正規化の適用 (日程表) ---
         if 'ホーム' in df.columns:
-            # SettingWithCopyWarning回避のため.locで代入
             df.loc[:, 'ホーム'] = df['ホーム'].apply(normalize_j_name)
         if 'アウェイ' in df.columns:
             df.loc[:, 'アウェイ'] = df['アウェイ'].apply(normalize_j_name)
@@ -239,41 +238,44 @@ def scrape_schedule_data(url):
         return None
 
 # --------------------------------------------------------------------------
-# データ加工関数 (日付パースをさらに堅牢化)
+# データ加工関数 (日付パースをさらに堅牢化 - 修正箇所)
 # --------------------------------------------------------------------------
 def parse_match_date(date_str, year):
-    """Jリーグの日程表文字列から、YYYY/MM/DD形式の日付オブジェクトを生成する（堅牢化）"""
+    """
+    Jリーグの日程表文字列から、YYYY/MM/DD形式の日付オブジェクトを生成する（堅牢化）
+    例: '25/02/23(日・祝)' -> datetime(2025, 2, 23)
+    """
     if pd.isna(date_str) or not isinstance(date_str, str) or not date_str:
         return pd.NaT
 
-    # 1. 不要な文字（曜日、時刻など）を削除し、純粋な日付 MM/DD のみに近づける
-    cleaned_date_str = date_str.strip()
+    # 1. 括弧とその中身をすべて削除 (曜日や祝日表記などのノイズを完全に除去)
+    # 例: '25/02/23(日・祝) 14:00' -> '25/02/23 14:00'
+    cleaned_date_str = re.sub(r'\(.*?\)', '', date_str).strip()
     
-    # (月), (火), ... (日) のパターンを削除
-    cleaned_date_str = re.sub(r'\([月火水木金土日]\)', '', cleaned_date_str)
-    # タイムスタンプ（HH:MM形式）やその他の文字列を削除
-    cleaned_date_str = re.sub(r'\s+\d{1,2}:\d{2}.*', '', cleaned_date_str)
+    # 2. 時刻やその他のノイズを削除し、日付部分 'YY/MM/DD' のみを取得
+    # 例: '25/02/23 14:00' -> '25/02/23'
+    match = re.search(r'(\d{1,2}/\d{1,2}/\d{1,2})', cleaned_date_str) 
     
-    # 2. MM/DD形式の文字列を抽出
-    match = re.search(r'(\d{1,2}/\d{1,2})', cleaned_date_str) 
-    if not match:
-        return pd.NaT
-
-    date_only_str = match.group(1).strip()
-    
-    try:
-        # 3. YYYY/MM/DD 形式でパースを試みる
-        # formatを強制し、errors='coerce'で失敗時にNaTを返す
-        parsed_date = pd.to_datetime(f'{year}/{date_only_str}', format='%Y/%m/%d', errors='coerce') 
+    if match:
+        date_part = match.group(1).strip()
         
-        # 4. パースチェック
-        if pd.isna(parsed_date) or parsed_date.year != year:
-             return pd.NaT
+        # %yは2桁の年（例: 25 -> 2025）としてパースすることを指示
+        parse_format = '%y/%m/%d' 
         
-        return parsed_date
-    except Exception:
-        # 予期せぬ例外時もNaTを返す
-        return pd.NaT
+        try:
+            # 3. パースを試みる
+            parsed_date = pd.to_datetime(date_part, format=parse_format, errors='coerce') 
+            
+            # 4. 年度のチェック: パースされた年が指定年度と一致するか確認
+            if pd.isna(parsed_date) or parsed_date.year != year:
+                 return pd.NaT
+            
+            return parsed_date
+        except Exception:
+            # パース中にエラーが発生した場合
+            return pd.NaT
+    
+    return pd.NaT # YY/MM/DD形式が見つからなかった場合
 
 @st.cache_data(ttl=3600) 
 def create_point_aggregate_df(schedule_df, current_year): 
@@ -293,7 +295,7 @@ def create_point_aggregate_df(schedule_df, current_year):
     
     df.loc[:, ['得点H', '得点A']] = df['スコア'].str.split('-', expand=True).astype(int)
 
-    # 日付のクリーニングとパース (最重要修正箇所)
+    # 日付のクリーニングとパース (強化された関数を使用)
     df.loc[:, '試合日_parsed'] = df['試合日'].apply(lambda x: parse_match_date(x, current_year))
     
     # パースに成功した行のみを保持
@@ -302,7 +304,7 @@ def create_point_aggregate_df(schedule_df, current_year):
     df = df.drop(columns=['試合日_parsed'])
 
     if df.empty:
-        # このメッセージが出る場合は、まだパースロジックに不備があることを意味する
+        # このメッセージは日付パース失敗が継続している場合に表示される
         logging.info("create_point_aggregate_df: 日付が有効なデータが見つかりませんでした。")
         return pd.DataFrame()
 
