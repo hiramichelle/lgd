@@ -385,7 +385,7 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     # --- 2. 直近の調子スコア ---
     form_H = calculate_recent_form(pointaggregate_df, home_team, selected_league)
     form_A = calculate_recent_form(pointaggregate_df, away_team, selected_league)
-    form_score_H = (form_H - form_A) * WEIGHT_FORM 
+    form_score_H = (form_H - form_A) * WEIGHT_FORM
     
     # --- 3. ホームアドバンテージ ---
     home_advantage_score = HOME_ADVANTAGE
@@ -397,15 +397,15 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     if home_win_score > DRAW_THRESHOLD:
         result = f"🔥 {home_team} の勝利"
         detail = f"予測優位スコア: {home_win_score:.1f}点 (順位:{rank_score_H:.1f}点 + 調子:{form_score_H:.1f}点 + Hアドバンテージ:{home_advantage_score:.1f}点)"
-        color = "#ff4b4b" 
+        color = "#ff4b4b"
     elif home_win_score < -DRAW_THRESHOLD:
         result = f"✈️ {away_team} の勝利"
         detail = f"予測優位スコア: {home_win_score:.1f}点 (順位:{rank_score_H:.1f}点 + 調子:{form_score_H:.1f}点 + Hアドバンテージ:{home_advantage_score:.1f}点)"
-        color = "#4b87ff" 
+        color = "#4b87ff"
     else:
         result = "🤝 引き分け"
         detail = f"予測優位スコア: {home_win_score:.1f}点 (極めて拮抗しています)"
-        color = "#ffd700" 
+        color = "#ffd700"
         
     return result, detail, color
 
@@ -421,7 +421,7 @@ try:
         st.header("共通設定")
         years = list(range(2020, pd.Timestamp.now().year + 2))
         current_year = st.selectbox("表示・予測する年度を選択してください:", years, index=years.index(pd.Timestamp.now().year), key='year_selector')
-        st.session_state.current_year = current_year 
+        st.session_state.current_year = current_year
 
         # --- データの取得 (キャッシュを利用) ---
         ranking_urls = {
