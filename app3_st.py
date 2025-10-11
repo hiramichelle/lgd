@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
 import re
-import unicodedata # <--- NFKC正規化のために追加
+import unicodedata 
+from io import StringIO # 文字列からの読み込みを可能にするために追加
 
 # --- 日本語フォント設定の強化 (変更なし) ---
 try:
@@ -44,34 +45,29 @@ logging.basicConfig(
 logging.info("--- アプリケーション開始 ---")
 
 # --------------------------------------------------------------------------
-# 大会名マスタの定義 
+# 大会名マスタの定義 (変更なし)
 # --------------------------------------------------------------------------
-# 大会名マスタ: normalize_j_nameでNFKC正規化された後の文字列をキーとして定義します。
 LEAGUE_NAME_MAPPING = {
-    # J1リーグ (キーはすべて半角Jと半角数字)
     '明治安田J1リーグ': 'J1',
     '明治安田生命J1リーグ': 'J1',
     '明治安田J1': 'J1',
     'J1': 'J1',
-    # J2リーグ (キーはすべて半角Jと半角数字)
     '明治安田J2リーグ': 'J2',
     '明治安田生命J2リーグ': 'J2',
     '明治安田J2': 'J2',
     'J2': 'J2',
-    # J3リーグ (キーはすべて半角Jと半角数字)
     '明治安田J3リーグ': 'J3',
     '明治安田生命J3リーグ': 'J3',
     '明治安田J3': 'J3',
     'J3': 'J3',
-    # ルヴァンカップなどその他の大会
     'ルヴァンカップ': 'ルヴァンカップ',
     'JリーグYBCルヴァンカップ': 'ルヴァンカップ',
-    # その他の略称もカバー（必要に応じて追加）
 }
 
 # --------------------------------------------------------------------------
-# チーム名マスタの定義と初期化 (変更なし)
+# チーム名マスタの定義と初期化 (J2/J3の表記揺れを大幅に拡張)
 # --------------------------------------------------------------------------
+# キー: 略称や揺れのある表記 / 値: 正規名称
 TEAM_NAME_MAPPING = {
     # J1主要チーム (略称)
     '浦和': '浦和レッズ',
@@ -94,20 +90,57 @@ TEAM_NAME_MAPPING = {
     '磐田': 'ジュビロ磐田',
     '福岡': 'アビスパ福岡',
     '横浜C': '横浜FC',
-    # J2/J3などの略称
     '東京V': '東京ヴェルディ',
     '清水': '清水エスパルス',
     '大宮': '大宮アルディージャ',
     '町田': 'FC町田ゼルビア',
-    '仙台': 'ベガルタ仙台', 
+    '仙台': 'ベガルタ仙台',
+    # J2/J3の略称・表記揺れを重点的に追加
+    '秋田': 'ブラウブリッツ秋田',
+    '山形': 'モンテディオ山形',
+    '水戸': '水戸ホーリーホック',
+    '栃木': '栃木SC',
+    '群馬': 'ザスパ群馬', # またはザスパクサツ群馬
+    '千葉': 'ジェフユナイテッド千葉',
+    '甲府': 'ヴァンフォーレ甲府',
+    '金沢': 'ツエーゲン金沢',
+    '岡山': 'ファジアーノ岡山',
+    '山口': 'レノファ山口FC',
+    '徳島': '徳島ヴォルティス',
+    '愛媛': '愛媛FC',
+    '長崎': 'V・ファーレン長崎',
+    '熊本': 'ロアッソ熊本',
+    '大分': '大分トリニータ',
+    '岩手': 'いわてグルージャ盛岡',
+    '福島': '福島ユナイテッドFC',
+    'YS横浜': 'Y.S.C.C.横浜',
+    '相模原': 'SC相模原',
+    '松本': '松本山雅FC',
+    '富山': 'カターレ富山',
+    '沼津': 'アスルクラロ沼津',
+    '岐阜': 'FC岐阜', # ユーザー報告の揺れに対応
+    '鳥取': 'ガイナーレ鳥取',
+    '讃岐': 'カマタマーレ讃岐',
+    '今治': 'FC今治',
+    '北九州': 'ギラヴァンツ北九州',
+    '琉球': 'FC琉球',
+    '宮崎': 'テゲバジャーロ宮崎',
+    '鹿児島': '鹿児島ユナイテッドFC',
+    
+    # 略称から正式名称へのマッピング (NFKCで半角になった略称も考慮)
+    'ザスパクサツ群馬': 'ザスパ群馬',
+    'FC岐阜': 'FC岐阜', 
+    'カマタマーレ讃岐': 'カマタマーレ讃岐',
+    'Y.S.C.C.横浜': 'Y.S.C.C.横浜',
 }
 
+# 最終的な正式名称をマッピングに追加（正規名称がキーで、値も正規名称）
 for canonical_name in list(TEAM_NAME_MAPPING.values()):
     if canonical_name not in TEAM_NAME_MAPPING:
         TEAM_NAME_MAPPING[canonical_name] = canonical_name
 
 # --------------------------------------------------------------------------
-# ヘルパー関数: リーグ名・チーム名を正規化する (NFKC正規化を導入)
+# ヘルパー関数: リーグ名・チーム名を正規化する 
 # --------------------------------------------------------------------------
 def normalize_j_name(name):
     """Jリーグ名やチーム名を半角に統一し、略称を正式名称にマッピングする (NFKC強化)"""
@@ -116,7 +149,6 @@ def normalize_j_name(name):
         normalized = unicodedata.normalize('NFKC', name)
         
         # 2. 個別の文字揺れの吸収 (NFKCでは吸収しきれない全角Jなどを確実に処理)
-        # Jリーグのサイトで多用される全角J/FCなどを半角に
         normalized = normalized.replace('Ｊ', 'J').replace('ＦＣ', 'FC').replace('Ｆ・Ｃ', 'FC')
         normalized = normalized.replace('　', ' ').strip() # 全角スペース除去
         
@@ -125,11 +157,12 @@ def normalize_j_name(name):
             return LEAGUE_NAME_MAPPING[normalized]
         
         # 4. チーム名マッピング（マスタ機能）を適用
+        # マッピングになければ、そのままの正規化済み文字列を返す
         return TEAM_NAME_MAPPING.get(normalized, normalized)
     return name
 
 # --------------------------------------------------------------------------
-# Webスクレイピング関数 (変更なし)
+# Webスクレイピング関数 (pd.read_htmlにStringIOを適用し、警告を回避)
 # --------------------------------------------------------------------------
 @st.cache_data(ttl=3600) # 1時間キャッシュ
 def scrape_ranking_data(url):
@@ -140,7 +173,8 @@ def scrape_ranking_data(url):
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         
-        dfs = pd.read_html(response.text, flavor='lxml', header=0, match='順位')
+        # StringIOでラップし、FutureWarningを回避
+        dfs = pd.read_html(StringIO(response.text), flavor='lxml', header=0, match='順位')
         
         if not dfs:
             logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
@@ -170,7 +204,8 @@ def scrape_schedule_data(url):
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         
-        dfs = pd.read_html(response.text, flavor='lxml', header=0, match='試合日')
+        # StringIOでラップし、FutureWarningを回避
+        dfs = pd.read_html(StringIO(response.text), flavor='lxml', header=0, match='試合日')
         
         if not dfs:
             logging.warning("read_htmlがテーブルを検出できませんでした。URL: %s", url)
@@ -188,7 +223,6 @@ def scrape_schedule_data(url):
         if 'アウェイ' in df.columns:
             df['アウェイ'] = df['アウェイ'].apply(normalize_j_name)
         if '大会' in df.columns:
-            # NFKC正規化により、全角文字(例: Ｊ１)が半角文字(例: J1)に変換されることを期待
             df['大会'] = df['大会'].apply(normalize_j_name)
         # ------------------------------------
 
@@ -202,7 +236,7 @@ def scrape_schedule_data(url):
 # --------------------------------------------------------------------------
 # データ加工関数 (日付パースをさらに堅牢化)
 # --------------------------------------------------------------------------
-@st.cache_data(ttl=3600) # 1時間キャッシュ
+@st.cache_data(ttl=3600) 
 def create_point_aggregate_df(schedule_df, current_year): 
     """日程表データから、チームごとの試合結果を集計するDataFrameを作成"""
     if schedule_df is None or schedule_df.empty:
@@ -220,31 +254,41 @@ def create_point_aggregate_df(schedule_df, current_year):
     
     df[['得点H', '得点A']] = df['スコア'].str.split('-', expand=True).astype(int)
 
-    # 日付のクリーニングとパース (修正: MM/DD形式の文字列を確実に抽出する)
+    # 日付のクリーニングとパース (修正: 無効な日付をより積極的に削除)
     def parse_match_date(date_str, year):
         if pd.isna(date_str) or not isinstance(date_str, str) or not date_str:
             return pd.NaT
         
-        # \d+/\d+ (MM/DD形式)を抽出し、曜日や前後の空白を削除
-        # これにより、"10/11(金)" や "10/11" のいずれからでも "10/11" を抽出できる
+        # MM/DD形式の文字列を抽出
         match = re.search(r'(\d{1,2}/\d{1,2})', date_str) 
         if not match:
+            # 日付パターンが見つからない場合はNaTを返す
             return pd.NaT
 
         date_only_str = match.group(1).strip()
         
         try:
             # YYYY/MM/DD 形式でパースを試みる
-            return pd.to_datetime(f'{year}/{date_only_str}', format='%Y/%m/%d', errors='coerce') 
-        except ValueError:
+            parsed_date = pd.to_datetime(f'{year}/{date_only_str}', format='%Y/%m/%d', errors='coerce') 
+            
+            # ここでさらに無効な日付をチェック（例: 2月30日など）
+            if pd.isna(parsed_date) or parsed_date.year != year:
+                 return pd.NaT
+            
+            return parsed_date
+        except Exception:
+            # その他予期せぬエラーの場合もNaTを返す
             return pd.NaT
     
-    # Apply the robust date parsing function
-    df['試合日'] = df['試合日'].apply(lambda x: parse_match_date(x, current_year))
-    df.dropna(subset=['試合日'], inplace=True) # 日付のパースに失敗した行をここで削除
+    # 堅牢な日付パース関数を適用
+    df['試合日_parsed'] = df['試合日'].apply(lambda x: parse_match_date(x, current_year))
+    
+    # パースに成功した行のみを保持し、元の'試合日'カラムを上書き
+    df.dropna(subset=['試合日_parsed'], inplace=True)
+    df['試合日'] = df['試合日_parsed']
+    df = df.drop(columns=['試合日_parsed'])
 
     if df.empty:
-        # 日付パース失敗のログを出力
         logging.info("create_point_aggregate_df: 日付が有効なデータが見つかりませんでした。")
         return pd.DataFrame()
 
@@ -278,6 +322,7 @@ def get_ranking_data_for_prediction(combined_ranking_df, league):
     if combined_ranking_df.empty: return {}
     league_df = combined_ranking_df[combined_ranking_df['大会'] == league]
     if '順位' in league_df.columns and 'チーム' in league_df.columns:
+        # NOTE: 順位表の'チーム'とpointaggregate_dfの'チーム'はどちらもnormalize_j_nameで正規化されているため、マッピングは成功するはず
         league_df['順位'] = pd.to_numeric(league_df['順位'], errors='coerce')
         return league_df.dropna(subset=['順位']).set_index('チーム')['順位'].to_dict()
     return {}
@@ -286,7 +331,7 @@ def calculate_recent_form(pointaggregate_df, team, league):
     """直近5試合の獲得勝点を計算する (チーム名、大会名は正規化されている前提)"""
     if pointaggregate_df.empty: return 0
     
-    # 選択された正規名称（例: J1）で集計DFをフィルタリング
+    # pointaggregate_dfの大会名とチーム名は正規化済み
     team_results = pointaggregate_df[
         (pointaggregate_df['大会'] == league) & 
         (pointaggregate_df['チーム'] == team)
@@ -299,7 +344,12 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     """ルールベースで勝敗を予測する (順位差、調子、ホームアドバンテージを使用)"""
     # データの存在チェック
     if combined_ranking_df.empty or pointaggregate_df.empty:
-        return "データ不足", "順位表または日程表データが取得できていないため予測できません。", "#ccc"
+        # pointaggregate_dfが空の場合は日付パース失敗が原因
+        if combined_ranking_df.empty:
+             return "データ不足", "順位表データが取得できていません。", "#ccc"
+        elif pointaggregate_df.empty:
+             return "データ不足", "日程表の日付またはスコアデータが正常に集計できていません。", "#ccc"
+
 
     # 順位データ取得
     ranking = get_ranking_data_for_prediction(combined_ranking_df, selected_league)
@@ -322,6 +372,11 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     form_A = calculate_recent_form(pointaggregate_df, away_team, selected_league)
     form_score_H = (form_H - form_A) * WEIGHT_FORM 
     
+    # pointaggregate_dfが空でなければ、form_H, form_Aは計算されているはず
+    if form_H == 0 and form_A == 0:
+        # 両チームとも試合結果がない場合
+        return "情報不足", "まだ両チームとも試合結果が記録されていないため、調子に基づく予測ができません。", "#ccc"
+
     # --- 3. ホームアドバンテージ ---
     home_advantage_score = HOME_ADVANTAGE
     
@@ -359,7 +414,6 @@ try:
         st.session_state.current_year = current_year 
 
         # --- データの取得 (キャッシュを利用) ---
-        # NOTE: ranking_urlsのキー ('J1', 'J2', 'J3') が、集計・フィルタリングの際の正規名称となる
         ranking_urls = {
             'J1': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%91%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=651&competitionSectionId=0&search=search',
             'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=655&competitionSectionId=0&search=search',
@@ -399,22 +453,20 @@ try:
         st.session_state.schedule_df = schedule_df
         
         # 集計DFの生成 (正規化されたチーム名と大会名を使って集計)
+        # 日付パースの再強化により、ここでpointaggregate_dfが空でないことを期待
         pointaggregate_df = create_point_aggregate_df(schedule_df, st.session_state.current_year)
         st.session_state.pointaggregate_df = pointaggregate_df
 
         # リーグオプションの生成
         league_options = []
-        # 1. ランキングデータ（J1, J2, J3）: 半角の正規名称のみ
         if 'combined_ranking_df' in st.session_state and not st.session_state.combined_ranking_df.empty:
             league_options.extend(st.session_state.combined_ranking_df['大会'].unique())
-        # 2. 日程表データ: 正規化後の大会名が入る (NFKCにより半角に統一されることを期待)
         if st.session_state.schedule_df is not None and not st.session_state.schedule_df.empty:
             schedule_league_options = st.session_state.schedule_df['大会'].unique()
             for l in schedule_league_options:
                 if l not in league_options:
                     league_options.append(l)
         
-        # プルダウンのオプションは、半角正規名称(J1, J2, J3)に統一されることを期待
         st.session_state.league_options = sorted(list(set(league_options)))
 
 
@@ -435,15 +487,13 @@ try:
         # サイドバーのデータビューア用選択肢
         with st.sidebar:
             st.header("データビューア設定")
-            # リーグ名が正規化されているため、プルダウンには統一名称（J1, J2など）のみが表示されることを期待
             selected_league_sidebar_viewer = st.selectbox('表示したい大会を選択してください (ビューア用):', st.session_state.league_options, key='viewer_league_selectbox')
 
-            # チーム選択プルダウン (正規化済みリストから生成されるため表記揺れは解消)
+            # チーム選択プルダウン (正規化済みリストから生成されるため表記揺れは解消を期待)
             team_options = []
             combined_ranking_df = st.session_state.combined_ranking_df
             schedule_df = st.session_state.schedule_df
 
-            # チームリストの取得を強化（ランキングか日程表のどちらかがあればチーム名を取得）
             if not combined_ranking_df.empty and selected_league_sidebar_viewer in combined_ranking_df['大会'].unique():
                 team_options.extend(combined_ranking_df[combined_ranking_df['大会'] == selected_league_sidebar_viewer]['チーム'].unique())
             
@@ -463,15 +513,15 @@ try:
             # 表示データ選択ラジオボタン
             st.header("表示データ選択")
             
+            # pointaggregate_dfが空かどうかでオプション表示を制御
+            is_point_aggregate_available = not st.session_state.pointaggregate_df.empty
+            
             data_type_options = ["日程表"] 
-            # pointaggregate_df が空でなければ、追加のオプションを表示
-            if not st.session_state.pointaggregate_df.empty: 
+            if is_point_aggregate_available: 
                 data_type_options.extend(["直近5試合", "順位変動グラフ"])
-            # ランキングデータが利用可能なら、順位表を追加
             if st.session_state.ranking_data_available and not st.session_state.combined_ranking_df.empty: 
                  data_type_options.insert(0, "順位表")
             
-            # デフォルトで「順位表」を選択できるようにする
             default_index = data_type_options.index("順位表") if "順位表" in data_type_options else 0
             data_type = st.radio("表示するデータを選択してください:", data_type_options, index=default_index, key='viewer_data_type')
 
@@ -479,7 +529,6 @@ try:
         if data_type == "順位表":
             st.subheader(f"{selected_league_sidebar_viewer} {st.session_state.current_year} 順位表")
             if st.session_state.ranking_data_available and not st.session_state.combined_ranking_df.empty:
-                # ランキングDFは手動で'大会'カラムが半角J1/J2/J3に設定されているため、ここで半角がフィルタされる
                 filtered_df = st.session_state.combined_ranking_df[st.session_state.combined_ranking_df['大会'] == selected_league_sidebar_viewer].drop(columns=['大会'])
                 st.dataframe(filtered_df)
             else:
@@ -489,9 +538,9 @@ try:
             st.subheader(f"{selected_league_sidebar_viewer} {st.session_state.current_year} 試合日程 ({selected_team_sidebar_viewer if selected_team_sidebar_viewer else '全試合'})")
             schedule_df = st.session_state.schedule_df
             if schedule_df is not None and not schedule_df.empty:
-                # 日程表の'大会'カラムはNFKC正規化を経ているため、半角J1/J2/J3でフィルタリングできるはず
                 league_filter = schedule_df['大会'] == selected_league_sidebar_viewer
                 if selected_team_sidebar_viewer:
+                    # チーム名が正規化されているため、ここでは確実に一致することを期待
                     team_filter = (schedule_df['ホーム'] == selected_team_sidebar_viewer) | (schedule_df['アウェイ'] == selected_team_sidebar_viewer)
                     final_filtered_df = schedule_df[league_filter & team_filter]
                 else:
@@ -504,107 +553,106 @@ try:
         elif data_type == "直近5試合":
             if not selected_team_sidebar_viewer:
                  st.warning("チームを選択してください。")
+            elif not is_point_aggregate_available:
+                 st.error("日程表データがないか、日付・スコアパースに失敗したため、直近5試合の集計ができませんでした。")
             else:
                 st.subheader(f"{selected_team_sidebar_viewer} 直近5試合結果")
                 pointaggregate_df = st.session_state.pointaggregate_df
-                if not pointaggregate_df.empty:
-                    # 集計DFの大会名も正規化されているため、フィルタリングが成功するはず
-                    team_results = pointaggregate_df[(pointaggregate_df['大会'] == selected_league_sidebar_viewer) & (pointaggregate_df['チーム'] == selected_team_sidebar_viewer)]
-                    recent_5_games = team_results.sort_values(by='試合日', ascending=False).head(5)
-                    recent_5_games = recent_5_games.sort_values(by='試合日', ascending=True)
-                    
-                    if recent_5_games.empty:
-                        st.warning(f"大会 {selected_league_sidebar_viewer} の試合結果がまだ集計されていません。")
-
+                
+                team_results = pointaggregate_df[(pointaggregate_df['大会'] == selected_league_sidebar_viewer) & (pointaggregate_df['チーム'] == selected_team_sidebar_viewer)]
+                recent_5_games = team_results.sort_values(by='試合日', ascending=False).head(5)
+                recent_5_games = recent_5_games.sort_values(by='試合日', ascending=True)
+                
+                if recent_5_games.empty:
+                    st.warning(f"大会 **{selected_league_sidebar_viewer}** の **{selected_team_sidebar_viewer}** の試合結果がまだ集計されていません。")
+                else:
                     recent_5_games['試合日'] = recent_5_games['試合日'].dt.strftime('%y/%m/%d')
                     
                     recent_form_points = calculate_recent_form(pointaggregate_df, selected_team_sidebar_viewer, selected_league_sidebar_viewer)
                     st.info(f"✅ 直近5試合の合計獲得勝点: **{recent_form_points}点** (最高15点)")
 
                     st.dataframe(recent_5_games[['試合日', '対戦相手', '勝敗', '得点', '失点', '勝点']])
-                else:
-                    # このエラーは、日付パースが成功しなかった場合にのみ表示されるはず
-                    st.error("日程表データがないか、日付パースに失敗したため、直近5試合の集計ができませんでした。")
 
         elif data_type == "順位変動グラフ":
             if not selected_team_sidebar_viewer:
                  st.warning("チームを選択してください。")
+            elif not is_point_aggregate_available:
+                 st.error("日程表データがないか、日付・スコアパースに失敗したため、順位変動グラフを作成できませんでした。")
             else:
                 st.subheader(f"{selected_league_sidebar_viewer} 順位変動グラフ ({st.session_state.current_year}年)")
                 pointaggregate_df = st.session_state.pointaggregate_df
-                if not pointaggregate_df.empty:
-                    all_teams_in_selected_league = pointaggregate_df[pointaggregate_df['大会'] == selected_league_sidebar_viewer]['チーム'].unique()
-                    
-                    selected_teams_rank_for_chart = st.multiselect(
-                        'グラフ表示チームを選択してください (複数選択可):', 
-                        all_teams_in_selected_league, 
-                        default=[selected_team_sidebar_viewer] if selected_team_sidebar_viewer in all_teams_in_selected_league else all_teams_in_selected_league[:1], 
-                        key='rank_team_multiselect_viewer'
-                    )
-                    
-                    if not selected_teams_rank_for_chart:
-                        st.warning("表示するチームを選択してください。")
-                    else:
-                        filtered_df_rank = pointaggregate_df[pointaggregate_df['大会'] == selected_league_sidebar_viewer]
-                        min_date = filtered_df_rank['試合日'].min()
-                        max_date = filtered_df_rank['試合日'].max()
-                        
-                        start_monday_candidate = min_date - pd.to_timedelta(min_date.weekday(), unit='D')
-                        start_monday = start_monday_candidate if start_monday_candidate <= min_date else start_monday_candidate + pd.to_timedelta(7, unit='D')
-                        
-                        weekly_mondays = pd.date_range(start=start_monday, end=max_date + pd.to_timedelta(7, unit='D'), freq='W-MON')
-                        
-                        weekly_rank_data = pd.DataFrame(index=weekly_mondays)
-
-                        for team in all_teams_in_selected_league: 
-                            team_cumulative_points = filtered_df_rank[
-                                filtered_df_rank['チーム'] == team
-                            ].set_index('試合日')['累積勝点']
-                            
-                            team_weekly_points = team_cumulative_points.reindex(weekly_mondays, method='ffill')
-                            weekly_rank_data[team] = team_weekly_points
-                        
-                        weekly_rank_data = weekly_rank_data.fillna(0)
-
-                        weekly_rank_df_rank = weekly_rank_data.rank(axis=1, ascending=False, method='min')
-                        
-                        fig, ax = plt.subplots(figsize=(12, 8))
-                        
-                        all_plotted_rank_data = []
-                        
-                        for team in selected_teams_rank_for_chart:
-                            if team in weekly_rank_df_rank.columns:
-                                team_rank_data = weekly_rank_df_rank[team].dropna()
-                                ax.plot(team_rank_data.index, team_rank_data.values, marker='o', linestyle='-', label=team)
-                                all_plotted_rank_data.append(team_rank_data)
-
-                        if all_plotted_rank_data:
-                            num_teams_in_league = len(all_teams_in_selected_league)
-                            ax.set_yticks(range(1, num_teams_in_league + 1)) 
-                            ax.invert_yaxis() 
-                            ax.set_ylim(num_teams_in_league + 1, 0)
-                        else:
-                            st.warning("選択したチームの順位データがありません。")
-                            st.stop()
-                        
-                        ax.set_title(f'{selected_league_sidebar_viewer} 順位変動 ({st.session_state.current_year}年 毎週月曜日時点)')
-                        ax.set_xlabel('試合日 (毎週月曜日)')
-                        ax.set_ylabel('順位')
-                        ax.grid(True)
-                        
-                        ax.legend(title="チーム", loc='best')
-                        
-                        ax.xaxis.set_major_locator(mdates.DayLocator(interval=14))
-                        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-                        
-                        plt.xticks(rotation=90)
-                        plt.tight_layout()
-                        
-                        st.pyplot(fig)
+                
+                all_teams_in_selected_league = pointaggregate_df[pointaggregate_df['大会'] == selected_league_sidebar_viewer]['チーム'].unique()
+                
+                selected_teams_rank_for_chart = st.multiselect(
+                    'グラフ表示チームを選択してください (複数選択可):', 
+                    all_teams_in_selected_league, 
+                    default=[selected_team_sidebar_viewer] if selected_team_sidebar_viewer in all_teams_in_selected_league else all_teams_in_selected_league[:1], 
+                    key='rank_team_multiselect_viewer'
+                )
+                
+                if not selected_teams_rank_for_chart:
+                    st.warning("表示するチームを選択してください。")
                 else:
-                    st.error("日程表データがないため、順位変動グラフを作成できませんでした。")
+                    filtered_df_rank = pointaggregate_df[pointaggregate_df['大会'] == selected_league_sidebar_viewer]
+                    min_date = filtered_df_rank['試合日'].min()
+                    max_date = filtered_df_rank['試合日'].max()
+                    
+                    # グラフのX軸の日付範囲設定
+                    start_monday_candidate = min_date - pd.to_timedelta(min_date.weekday(), unit='D')
+                    start_monday = start_monday_candidate if start_monday_candidate <= min_date else start_monday_candidate + pd.to_timedelta(7, unit='D')
+                    
+                    weekly_mondays = pd.date_range(start=start_monday, end=max_date + pd.to_timedelta(7, unit='D'), freq='W-MON')
+                    
+                    weekly_rank_data = pd.DataFrame(index=weekly_mondays)
 
+                    for team in all_teams_in_selected_league: 
+                        team_cumulative_points = filtered_df_rank[
+                            filtered_df_rank['チーム'] == team
+                        ].set_index('試合日')['累積勝点']
+                        
+                        team_weekly_points = team_cumulative_points.reindex(weekly_mondays, method='ffill')
+                        weekly_rank_data[team] = team_weekly_points
+                    
+                    weekly_rank_data = weekly_rank_data.fillna(0)
 
+                    # 勝点が多い方が順位が上（値が小さい）になるように降順で順位付け
+                    weekly_rank_df_rank = weekly_rank_data.rank(axis=1, ascending=False, method='min')
+                    
+                    fig, ax = plt.subplots(figsize=(12, 8))
+                    
+                    all_plotted_rank_data = []
+                    
+                    for team in selected_teams_rank_for_chart:
+                        if team in weekly_rank_df_rank.columns:
+                            team_rank_data = weekly_rank_df_rank[team].dropna()
+                            ax.plot(team_rank_data.index, team_rank_data.values, marker='o', linestyle='-', label=team)
+                            all_plotted_rank_data.append(team_rank_data)
+
+                    if all_plotted_rank_data:
+                        num_teams_in_league = len(all_teams_in_selected_league)
+                        ax.set_yticks(range(1, num_teams_in_league + 1)) 
+                        ax.invert_yaxis() # 順位は小さいほど上（グラフの上）
+                        ax.set_ylim(num_teams_in_league + 1, 0)
+                    else:
+                        st.warning("選択したチームの順位データがありません。")
+                        st.stop()
+                    
+                    ax.set_title(f'{selected_league_sidebar_viewer} 順位変動 ({st.session_state.current_year}年 毎週月曜日時点)')
+                    ax.set_xlabel('試合日 (毎週月曜日)')
+                    ax.set_ylabel('順位')
+                    ax.grid(True)
+                    
+                    ax.legend(title="チーム", loc='best')
+                    
+                    ax.xaxis.set_major_locator(mdates.DayLocator(interval=14))
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+                    
+                    plt.xticks(rotation=90)
+                    plt.tight_layout()
+                    
+                    st.pyplot(fig)
+                
     # ----------------------------------------------------------------------
     # タブ2: 勝敗予測ツール
     # ----------------------------------------------------------------------
@@ -635,10 +683,8 @@ try:
                 home_team = st.selectbox('🏠 ホームチームを選択:', predictor_team_options, index=0, key='predictor_home_team')
             
             with col_away:
-                initial_away_index = 1 if len(predictor_team_options) > 1 and home_team == predictor_team_options[0] else 0
-                if home_team == predictor_team_options[initial_away_index] and len(predictor_team_options) > 1:
-                    initial_away_index = (initial_away_index + 1) % len(predictor_team_options)
-
+                # ホームチームとは異なるチームを初期選択
+                initial_away_index = (predictor_team_options.index(home_team) + 1) % len(predictor_team_options) if home_team in predictor_team_options else 1
                 away_team = st.selectbox('✈️ アウェイチームを選択:', predictor_team_options, index=initial_away_index, key='predictor_away_team')
 
             with col_vs:
