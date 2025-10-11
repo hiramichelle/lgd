@@ -27,14 +27,14 @@ try:
     if font_name:
         plt.rcParams['font.family'] = font_name
         plt.rcParams['axes.unicode_minus'] = False
-        st.info(f"✅ 日本語フォント **{font_name}** を設定しました。")
+        # st.info(f"✅ 日本語フォント **{font_name}** を設定しました。")
     else:
         plt.rcParams['font.family'] = 'sans-serif'
         plt.rcParams['axes.unicode_minus'] = False
-        st.warning("⚠️ システム内で日本語フォントが見つかりませんでした。グラフの日本語が文字化けする可能性があります。")
+        # st.warning("⚠️ システム内で日本語フォントが見つかりませんでした。グラフの日本語が文字化けする可能性があります。")
 
 except Exception as e:
-    st.error(f"致命的なフォント設定エラーが発生しました: {e}。デフォルトフォントを使用します。")
+    # st.error(f"致命的なフォント設定エラーが発生しました: {e}。デフォルトフォントを使用します。")
     plt.rcParams['axes.unicode_minus'] = False
     plt.rcParams['font.family'] = 'sans-serif'
 
@@ -47,11 +47,37 @@ logging.basicConfig(
 logging.info("--- アプリケーション開始 ---")
 
 # --------------------------------------------------------------------------
+# 大会名マスタの定義 (NEW!)
+# --------------------------------------------------------------------------
+# 大会名マスタ: サイトから取得される表記揺れを、集計用/フィルタリング用のシンプルな正規名称に統一します。
+# キー: サイトから取得される可能性のある表記 (例: 全角、長文)
+# 値: 正規の統一大会名称 (例: J1, J2)
+LEAGUE_NAME_MAPPING = {
+    # J1リーグ
+    '明治安田Ｊ１リーグ': 'J1',
+    '明治安田生命Ｊ１リーグ': 'J1',
+    '明治安田Ｊ１': 'J1',
+    'J1': 'J1',
+    # J2リーグ
+    '明治安田Ｊ２リーグ': 'J2',
+    '明治安田生命Ｊ２リーグ': 'J2',
+    '明治安田Ｊ２': 'J2',
+    'J2': 'J2',
+    # J3リーグ
+    '明治安田Ｊ３リーグ': 'J3',
+    '明治安田生命Ｊ３リーグ': 'J3',
+    '明治安田Ｊ３': 'J3',
+    'J3': 'J3',
+    # ルヴァンカップなどその他の大会
+    'ルヴァンカップ': 'ルヴァンカップ',
+    'ＪリーグYBCルヴァンカップ': 'ルヴァンカップ',
+    # その他の略称もカバー（必要に応じて追加）
+}
+
+# --------------------------------------------------------------------------
 # チーム名マスタの定義と初期化
 # --------------------------------------------------------------------------
 # チーム名マスタ (略称や表記揺れを正式名称に統一するための辞書)
-# キー: サイトから取得される可能性のある略称・揺れ表記
-# 値: 正規の統一チーム名称
 TEAM_NAME_MAPPING = {
     # J1主要チーム (略称)
     '浦和': '浦和レッズ',
@@ -82,27 +108,29 @@ TEAM_NAME_MAPPING = {
     '仙台': 'ベガルタ仙台', 
 }
 
-# --- 重要: マスタ方式の徹底 (自己マッピングを保証) ---
-# 正規名称自体をキーとして追加し、どのデータソースから来ても必ず同じ正規名称に「洗い替える」ことを保証します。
-# 例: '浦和レッズ': '浦和レッズ' が追加される
+# 既存のチーム名マスタに自己マッピングを保証
 for canonical_name in list(TEAM_NAME_MAPPING.values()):
     if canonical_name not in TEAM_NAME_MAPPING:
         TEAM_NAME_MAPPING[canonical_name] = canonical_name
 
 # --------------------------------------------------------------------------
-# ヘルパー関数: リーグ名・チーム名を正規化する
+# ヘルパー関数: リーグ名・チーム名を正規化する (LOGIC CHANGE)
 # --------------------------------------------------------------------------
 def normalize_j_name(name):
     """Jリーグ名やチーム名を半角に統一し、略称を正式名称にマッピングする"""
     if isinstance(name, str):
         # 1. 文字レベルの正規化 (全角/半角の揺れを吸収)
-        # J, FC, F.C. の全角半角を統一
+        # Ｊ, ＦＣ, Ｆ・Ｃ などの全角文字を半角に統一
         normalized = name.replace('Ｊ', 'J').replace('ＦＣ', 'FC').replace('Ｆ・Ｃ', 'FC')
         normalized = normalized.replace('　', ' ').strip() # 全角スペース除去
         
-        # 2. チーム名マッピング（マスタ機能）を適用
-        # 略称/揺れ表記でも、正式名称でも、必ず一つの正規名称に統一される。
-        # これが「洗い替え」処理の実体です。
+        # 2. 大会名マッピングを優先的に適用
+        # 大会名であれば、集計・フィルタリング用のシンプルな名称に「洗い替え」
+        if normalized in LEAGUE_NAME_MAPPING:
+            return LEAGUE_NAME_MAPPING[normalized]
+        
+        # 3. チーム名マッピング（マスタ機能）を適用
+        # チーム名であれば、統一チーム名称に「洗い替え」
         return TEAM_NAME_MAPPING.get(normalized, normalized)
     return name
 
@@ -112,7 +140,7 @@ def normalize_j_name(name):
 @st.cache_data(ttl=3600) # 1時間キャッシュ
 def scrape_ranking_data(url):
     """
-    Jリーグ公式サイトから順位表をスクレイピングし、**チーム名を正規化**する。
+    Jリーグ公式サイトから順位表をスクレイピングし、**チーム名と大会名を正規化**する。
     """
     logging.info(f"scrape_ranking_data: URL {url} からスクレイピング開始。")
     try:
@@ -132,7 +160,6 @@ def scrape_ranking_data(url):
         
         # --- チーム名正規化の適用 (ランキング) ---
         if 'チーム' in df.columns:
-            # 取得したチーム名に対し、マスタに照らし合わせて洗い替えを行う
             df['チーム'] = df['チーム'].apply(normalize_j_name)
         # ---------------------------------------
             
@@ -145,7 +172,7 @@ def scrape_ranking_data(url):
 @st.cache_data(ttl=3600) # 1時間キャッシュ
 def scrape_schedule_data(url):
     """
-    Jリーグ公式サイトから日程表をスクレイピングし、**チーム名を正規化**する。
+    Jリーグ公式サイトから日程表をスクレイピングし、**チーム名と大会名を正規化**する。
     """
     logging.info(f"scrape_schedule_data: URL {url} からスクレイピング開始。")
     try:
@@ -165,16 +192,15 @@ def scrape_schedule_data(url):
         cols_to_keep = [col for col in expected_cols if col in df.columns]
         df = df[cols_to_keep]
 
-        # --- チーム名正規化の適用 (日程表) ---
-        # 取得したチーム名に対し、マスタに照らし合わせて洗い替えを行う
+        # --- 大会名、チーム名正規化の適用 (日程表) ---
         if 'ホーム' in df.columns:
             df['ホーム'] = df['ホーム'].apply(normalize_j_name)
         if 'アウェイ' in df.columns:
             df['アウェイ'] = df['アウェイ'].apply(normalize_j_name)
-        # ------------------------------------
-
         if '大会' in df.columns:
+            # ここで大会名（例: 明治安田Ｊ１リーグ）が J1 に洗い替えられる！
             df['大会'] = df['大会'].apply(normalize_j_name)
+        # ------------------------------------
 
         return df
         
@@ -258,10 +284,10 @@ def get_ranking_data_for_prediction(combined_ranking_df, league):
     return {}
 
 def calculate_recent_form(pointaggregate_df, team, league):
-    """直近5試合の獲得勝点を計算する (チーム名は正規化されている前提)"""
+    """直近5試合の獲得勝点を計算する (チーム名、大会名は正規化されている前提)"""
     if pointaggregate_df.empty: return 0
     
-    # 選択された正規名称で集計DFをフィルタリング
+    # 選択された正規名称（例: J1）で集計DFをフィルタリング
     team_results = pointaggregate_df[
         (pointaggregate_df['大会'] == league) & 
         (pointaggregate_df['チーム'] == team)
@@ -334,6 +360,7 @@ try:
         st.session_state.current_year = current_year 
 
         # --- データの取得 (キャッシュを利用) ---
+        # NOTE: ranking_urlsのキー ('J1', 'J2', 'J3') が、集計・フィルタリングの際の正規名称となる
         ranking_urls = {
             'J1': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%91%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=651&competitionSectionId=0&search=search',
             'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=655&competitionSectionId=0&search=search',
@@ -352,7 +379,8 @@ try:
             try:
                 for league, df_val in ranking_dfs_raw.items():
                     if df_val is not None:
-                        df_val['大会'] = normalize_j_name(league)
+                        # ここでは手動で正規名称(J1, J2など)を設定（URLキーを使用）
+                        df_val['大会'] = league
                 combined_ranking_df = pd.concat(valid_ranking_dfs, ignore_index=True)
                 ranking_data_available = True
             except ValueError as e:
@@ -371,7 +399,7 @@ try:
         schedule_df = scrape_schedule_data(schedule_url)
         st.session_state.schedule_df = schedule_df
         
-        # 集計DFの生成 (正規化されたチーム名を使って集計)
+        # 集計DFの生成 (正規化されたチーム名と大会名を使って集計)
         pointaggregate_df = create_point_aggregate_df(schedule_df, st.session_state.current_year)
         st.session_state.pointaggregate_df = pointaggregate_df
 
@@ -380,6 +408,7 @@ try:
         if 'combined_ranking_df' in st.session_state and not st.session_state.combined_ranking_df.empty:
             league_options.extend(st.session_state.combined_ranking_df['大会'].unique())
         if st.session_state.schedule_df is not None and not st.session_state.schedule_df.empty:
+            # 日程表の大会名は正規化されている（J1, J2, J3など）ため、そのまま追加
             schedule_league_options = st.session_state.schedule_df['大会'].unique()
             for l in schedule_league_options:
                 if l not in league_options:
@@ -404,6 +433,7 @@ try:
         # サイドバーのデータビューア用選択肢
         with st.sidebar:
             st.header("データビューア設定")
+            # リーグ名が正規化されているため、プルダウンには統一名称（J1, J2など）のみが表示される
             selected_league_sidebar_viewer = st.selectbox('表示したい大会を選択してください (ビューア用):', st.session_state.league_options, key='viewer_league_selectbox')
 
             # チーム選択プルダウン (正規化済みリストから生成されるため表記揺れは解消)
@@ -451,6 +481,7 @@ try:
             st.subheader(f"{selected_league_sidebar_viewer} {st.session_state.current_year} 試合日程 ({selected_team_sidebar_viewer})")
             schedule_df = st.session_state.schedule_df
             if schedule_df is not None and not schedule_df.empty:
+                # フィルタリングに正規化済みの大会名とチーム名を使用
                 team_filter = (schedule_df['ホーム'] == selected_team_sidebar_viewer) | (schedule_df['アウェイ'] == selected_team_sidebar_viewer)
                 final_filtered_df = schedule_df[(schedule_df['大会'] == selected_league_sidebar_viewer) & team_filter]
                 st.dataframe(final_filtered_df)
@@ -461,16 +492,17 @@ try:
             st.subheader(f"{selected_team_sidebar_viewer} 直近5試合結果")
             pointaggregate_df = st.session_state.pointaggregate_df
             if not pointaggregate_df.empty:
+                # 集計DFの大会名も正規化されているため、フィルタリングが成功するはず
                 team_results = pointaggregate_df[(pointaggregate_df['大会'] == selected_league_sidebar_viewer) & (pointaggregate_df['チーム'] == selected_team_sidebar_viewer)]
                 recent_5_games = team_results.sort_values(by='試合日', ascending=False).head(5)
                 recent_5_games = recent_5_games.sort_values(by='試合日', ascending=True)
                 
                 if recent_5_games.empty:
-                     st.warning("このチームの試合結果がまだ集計されていません。またはマッピング辞書に不足があるかもしれません。")
+                     st.warning("このチームの試合結果がまだ集計されていません。または大会名/チーム名のマッピング辞書に不足があるかもしれません。")
 
                 recent_5_games['試合日'] = recent_5_games['試合日'].dt.strftime('%y%m%d')
                 
-                # 直近5試合の勝点合計を表示（これで0が解消されているか確認できます）
+                # 直近5試合の勝点合計を表示（ここで0が解消されているはず）
                 recent_form_points = calculate_recent_form(pointaggregate_df, selected_team_sidebar_viewer, selected_league_sidebar_viewer)
                 st.info(f"✅ 直近5試合の合計獲得勝点: **{recent_form_points}点** (最高15点)")
 
