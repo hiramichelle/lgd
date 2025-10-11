@@ -7,7 +7,7 @@ import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
 import re
 import unicodedata 
-from io import StringIO # 文字列からの読み込みを可能にするために追加
+from io import StringIO 
 
 # --- 日本語フォント設定の強化 (変更なし) ---
 try:
@@ -65,7 +65,7 @@ LEAGUE_NAME_MAPPING = {
 }
 
 # --------------------------------------------------------------------------
-# チーム名マスタの定義と初期化 (J2/J3の表記揺れを大幅に拡張)
+# チーム名マスタの定義と初期化 (J2/J3の表記揺れを大幅に拡張 & 栃木の揺れ対応)
 # --------------------------------------------------------------------------
 # キー: 略称や揺れのある表記 / 値: 正規名称
 TEAM_NAME_MAPPING = {
@@ -100,7 +100,7 @@ TEAM_NAME_MAPPING = {
     '山形': 'モンテディオ山形',
     '水戸': '水戸ホーリーホック',
     '栃木': '栃木SC',
-    '群馬': 'ザスパ群馬', # またはザスパクサツ群馬
+    '群馬': 'ザスパ群馬', 
     '千葉': 'ジェフユナイテッド千葉',
     '甲府': 'ヴァンフォーレ甲府',
     '金沢': 'ツエーゲン金沢',
@@ -118,7 +118,7 @@ TEAM_NAME_MAPPING = {
     '松本': '松本山雅FC',
     '富山': 'カターレ富山',
     '沼津': 'アスルクラロ沼津',
-    '岐阜': 'FC岐阜', # ユーザー報告の揺れに対応
+    '岐阜': 'FC岐阜', 
     '鳥取': 'ガイナーレ鳥取',
     '讃岐': 'カマタマーレ讃岐',
     '今治': 'FC今治',
@@ -127,11 +127,15 @@ TEAM_NAME_MAPPING = {
     '宮崎': 'テゲバジャーロ宮崎',
     '鹿児島': '鹿児島ユナイテッドFC',
     
-    # 略称から正式名称へのマッピング (NFKCで半角になった略称も考慮)
+    # ユーザー報告の揺れに対応
     'ザスパクサツ群馬': 'ザスパ群馬',
     'FC岐阜': 'FC岐阜', 
     'カマタマーレ讃岐': 'カマタマーレ讃岐',
     'Y.S.C.C.横浜': 'Y.S.C.C.横浜',
+    
+    # 追加した栃木SCの揺れ
+    '栃木C': '栃木SC', 
+    '栃木シティ': '栃木SC', 
 }
 
 # 最終的な正式名称をマッピングに追加（正規名称がキーで、値も正規名称）
@@ -162,7 +166,7 @@ def normalize_j_name(name):
     return name
 
 # --------------------------------------------------------------------------
-# Webスクレイピング関数 (pd.read_htmlにStringIOを適用し、警告を回避)
+# Webスクレイピング関数 
 # --------------------------------------------------------------------------
 @st.cache_data(ttl=3600) # 1時間キャッシュ
 def scrape_ranking_data(url):
@@ -219,11 +223,12 @@ def scrape_schedule_data(url):
 
         # --- 大会名、チーム名正規化の適用 (日程表) ---
         if 'ホーム' in df.columns:
-            df['ホーム'] = df['ホーム'].apply(normalize_j_name)
+            # SettingWithCopyWarning回避のため.locで代入
+            df.loc[:, 'ホーム'] = df['ホーム'].apply(normalize_j_name)
         if 'アウェイ' in df.columns:
-            df['アウェイ'] = df['アウェイ'].apply(normalize_j_name)
+            df.loc[:, 'アウェイ'] = df['アウェイ'].apply(normalize_j_name)
         if '大会' in df.columns:
-            df['大会'] = df['大会'].apply(normalize_j_name)
+            df.loc[:, '大会'] = df['大会'].apply(normalize_j_name)
         # ------------------------------------
 
         return df
@@ -236,6 +241,40 @@ def scrape_schedule_data(url):
 # --------------------------------------------------------------------------
 # データ加工関数 (日付パースをさらに堅牢化)
 # --------------------------------------------------------------------------
+def parse_match_date(date_str, year):
+    """Jリーグの日程表文字列から、YYYY/MM/DD形式の日付オブジェクトを生成する（堅牢化）"""
+    if pd.isna(date_str) or not isinstance(date_str, str) or not date_str:
+        return pd.NaT
+
+    # 1. 不要な文字（曜日、時刻など）を削除し、純粋な日付 MM/DD のみに近づける
+    cleaned_date_str = date_str.strip()
+    
+    # (月), (火), ... (日) のパターンを削除
+    cleaned_date_str = re.sub(r'\([月火水木金土日]\)', '', cleaned_date_str)
+    # タイムスタンプ（HH:MM形式）やその他の文字列を削除
+    cleaned_date_str = re.sub(r'\s+\d{1,2}:\d{2}.*', '', cleaned_date_str)
+    
+    # 2. MM/DD形式の文字列を抽出
+    match = re.search(r'(\d{1,2}/\d{1,2})', cleaned_date_str) 
+    if not match:
+        return pd.NaT
+
+    date_only_str = match.group(1).strip()
+    
+    try:
+        # 3. YYYY/MM/DD 形式でパースを試みる
+        # formatを強制し、errors='coerce'で失敗時にNaTを返す
+        parsed_date = pd.to_datetime(f'{year}/{date_only_str}', format='%Y/%m/%d', errors='coerce') 
+        
+        # 4. パースチェック
+        if pd.isna(parsed_date) or parsed_date.year != year:
+             return pd.NaT
+        
+        return parsed_date
+    except Exception:
+        # 予期せぬ例外時もNaTを返す
+        return pd.NaT
+
 @st.cache_data(ttl=3600) 
 def create_point_aggregate_df(schedule_df, current_year): 
     """日程表データから、チームごとの試合結果を集計するDataFrameを作成"""
@@ -252,78 +291,53 @@ def create_point_aggregate_df(schedule_df, current_year):
         logging.info("create_point_aggregate_df: スコア形式のデータが見つかりませんでした。")
         return pd.DataFrame()
     
-    df[['得点H', '得点A']] = df['スコア'].str.split('-', expand=True).astype(int)
+    df.loc[:, ['得点H', '得点A']] = df['スコア'].str.split('-', expand=True).astype(int)
 
-    # 日付のクリーニングとパース (修正: 無効な日付をより積極的に削除)
-    def parse_match_date(date_str, year):
-        if pd.isna(date_str) or not isinstance(date_str, str) or not date_str:
-            return pd.NaT
-        
-        # MM/DD形式の文字列を抽出
-        match = re.search(r'(\d{1,2}/\d{1,2})', date_str) 
-        if not match:
-            # 日付パターンが見つからない場合はNaTを返す
-            return pd.NaT
-
-        date_only_str = match.group(1).strip()
-        
-        try:
-            # YYYY/MM/DD 形式でパースを試みる
-            parsed_date = pd.to_datetime(f'{year}/{date_only_str}', format='%Y/%m/%d', errors='coerce') 
-            
-            # ここでさらに無効な日付をチェック（例: 2月30日など）
-            if pd.isna(parsed_date) or parsed_date.year != year:
-                 return pd.NaT
-            
-            return parsed_date
-        except Exception:
-            # その他予期せぬエラーの場合もNaTを返す
-            return pd.NaT
+    # 日付のクリーニングとパース (最重要修正箇所)
+    df.loc[:, '試合日_parsed'] = df['試合日'].apply(lambda x: parse_match_date(x, current_year))
     
-    # 堅牢な日付パース関数を適用
-    df['試合日_parsed'] = df['試合日'].apply(lambda x: parse_match_date(x, current_year))
-    
-    # パースに成功した行のみを保持し、元の'試合日'カラムを上書き
+    # パースに成功した行のみを保持
     df.dropna(subset=['試合日_parsed'], inplace=True)
-    df['試合日'] = df['試合日_parsed']
+    df.loc[:, '試合日'] = df['試合日_parsed']
     df = df.drop(columns=['試合日_parsed'])
 
     if df.empty:
+        # このメッセージが出る場合は、まだパースロジックに不備があることを意味する
         logging.info("create_point_aggregate_df: 日付が有効なデータが見つかりませんでした。")
         return pd.DataFrame()
 
+    # --- 集計ロジック (変更なし) ---
     home_df = df.rename(columns={'ホーム': 'チーム', 'アウェイ': '相手', '得点H': '得点', '得点A': '失点'})
-    home_df['得失差'] = home_df['得点'] - home_df['失点']
-    home_df['勝敗'] = home_df.apply(lambda row: '勝' if row['得点'] > row['失点'] else ('分' if row['得点'] == row['失点'] else '敗'), axis=1)
-    home_df['勝点'] = home_df.apply(lambda row: 3 if row['勝敗'] == '勝' else (1 if row['勝敗'] == '分' else 0), axis=1)
-    home_df['対戦相手'] = home_df['相手']
+    home_df.loc[:, '得失差'] = home_df['得点'] - home_df['失点']
+    home_df.loc[:, '勝敗'] = home_df.apply(lambda row: '勝' if row['得点'] > row['失点'] else ('分' if row['得点'] == row['失点'] else '敗'), axis=1)
+    home_df.loc[:, '勝点'] = home_df.apply(lambda row: 3 if row['勝敗'] == '勝' else (1 if row['勝敗'] == '分' else 0), axis=1)
+    home_df.loc[:, '対戦相手'] = home_df['相手']
     home_df = home_df[['大会', '試合日', 'チーム', '対戦相手', '勝敗', '得点', '失点', '得失差', '勝点']]
 
     away_df = df.rename(columns={'アウェイ': 'チーム', 'ホーム': '相手', '得点A': '得点', '得点H': '失点'})
-    away_df['得失差'] = away_df['得点'] - away_df['失点']
-    away_df['勝敗'] = away_df.apply(lambda row: '勝' if row['得点'] > row['失点'] else ('分' if row['得点'] == row['失点'] else '敗'), axis=1)
-    away_df['勝点'] = away_df.apply(lambda row: 3 if row['勝敗'] == '勝' else (1 if row['勝敗'] == '分' else 0), axis=1)
-    away_df['対戦相手'] = away_df['相手']
+    away_df.loc[:, '得失差'] = away_df['得点'] - away_df['失点']
+    away_df.loc[:, '勝敗'] = away_df.apply(lambda row: '勝' if row['得点'] > row['失点'] else ('分' if row['得点'] == row['失点'] else '敗'), axis=1)
+    away_df.loc[:, '勝点'] = away_df.apply(lambda row: 3 if row['勝敗'] == '勝' else (1 if row['勝敗'] == '分' else 0), axis=1)
+    away_df.loc[:, '対戦相手'] = away_df['相手']
     away_df = away_df[['大会', '試合日', 'チーム', '対戦相手', '勝敗', '得点', '失点', '得失差', '勝点']]
 
     pointaggregate_df = pd.concat([home_df, away_df], ignore_index=True)
     pointaggregate_df = pointaggregate_df.sort_values(by=['試合日'], ascending=True)
-    pointaggregate_df['累積勝点'] = pointaggregate_df.groupby(['チーム'])['勝点'].cumsum()
+    pointaggregate_df.loc[:, '累積勝点'] = pointaggregate_df.groupby(['チーム'])['勝点'].cumsum()
 
     return pointaggregate_df
 
 
 # --------------------------------------------------------------------------
-# 予測用ヘルパー関数 (変更なし)
+# 予測用ヘルパー関数 (SetttingWithCopyWarning回避のためlocを適用)
 # --------------------------------------------------------------------------
 
 def get_ranking_data_for_prediction(combined_ranking_df, league):
     """指定されたリーグの順位データを {チーム名: 順位} の辞書形式で返す"""
     if combined_ranking_df.empty: return {}
-    league_df = combined_ranking_df[combined_ranking_df['大会'] == league]
+    league_df = combined_ranking_df[combined_ranking_df['大会'] == league].copy() # 警告回避のためcopy()
     if '順位' in league_df.columns and 'チーム' in league_df.columns:
-        # NOTE: 順位表の'チーム'とpointaggregate_dfの'チーム'はどちらもnormalize_j_nameで正規化されているため、マッピングは成功するはず
-        league_df['順位'] = pd.to_numeric(league_df['順位'], errors='coerce')
+        league_df.loc[:, '順位'] = pd.to_numeric(league_df['順位'], errors='coerce')
         return league_df.dropna(subset=['順位']).set_index('チーム')['順位'].to_dict()
     return {}
 
@@ -348,7 +362,8 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
         if combined_ranking_df.empty:
              return "データ不足", "順位表データが取得できていません。", "#ccc"
         elif pointaggregate_df.empty:
-             return "データ不足", "日程表の日付またはスコアデータが正常に集計できていません。", "#ccc"
+             # 日付パース失敗が原因である可能性が高いため、具体的なエラーメッセージを返す
+             return "データ不足", "日程表の試合結果（日付とスコア）集計ができていません。データが未更新か、日付パースエラーが続いています。", "#ccc"
 
 
     # 順位データ取得
@@ -372,11 +387,6 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     form_A = calculate_recent_form(pointaggregate_df, away_team, selected_league)
     form_score_H = (form_H - form_A) * WEIGHT_FORM 
     
-    # pointaggregate_dfが空でなければ、form_H, form_Aは計算されているはず
-    if form_H == 0 and form_A == 0:
-        # 両チームとも試合結果がない場合
-        return "情報不足", "まだ両チームとも試合結果が記録されていないため、調子に基づく予測ができません。", "#ccc"
-
     # --- 3. ホームアドバンテージ ---
     home_advantage_score = HOME_ADVANTAGE
     
@@ -432,8 +442,7 @@ try:
             try:
                 for league, df_val in ranking_dfs_raw.items():
                     if df_val is not None:
-                        # ここでは手動で正規名称(J1, J2など)を設定（URLキーを使用）
-                        df_val['大会'] = league
+                        df_val.loc[:, '大会'] = league
                 combined_ranking_df = pd.concat(valid_ranking_dfs, ignore_index=True)
                 ranking_data_available = True
             except ValueError as e:
@@ -453,7 +462,6 @@ try:
         st.session_state.schedule_df = schedule_df
         
         # 集計DFの生成 (正規化されたチーム名と大会名を使って集計)
-        # 日付パースの再強化により、ここでpointaggregate_dfが空でないことを期待
         pointaggregate_df = create_point_aggregate_df(schedule_df, st.session_state.current_year)
         st.session_state.pointaggregate_df = pointaggregate_df
 
