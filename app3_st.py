@@ -7,8 +7,8 @@ import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
 import re
 import unicodedata
-from io import StringIO 
-import numpy as np 
+from io import StringIO
+import numpy as np
 
 # --- 日本語フォント設定の強化 (変更なし) ---
 try:
