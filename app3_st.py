@@ -326,8 +326,8 @@ def create_point_aggregate_df(schedule_df, current_year):
     
     # 累積勝点、累積得失点差、累積総得点を計算（順位決定基準のため）
     pointaggregate_df.loc[:, '累積勝点'] = pointaggregate_df.groupby(['チーム'])['勝点'].cumsum()
-    pointaggregate_df.loc[:, '累積得失点差'] = pointaggregate_df.groupby(['チーム'])['得失差'].cumsum() 
-    pointaggregate_df.loc[:, '累積総得点'] = pointaggregate_df.groupby(['チーム'])['得点'].cumsum()    
+    pointaggregate_df.loc[:, '累積得失点差'] = pointaggregate_df.groupby(['チーム'])['得失差'].cumsum()
+    pointaggregate_df.loc[:, '累積総得点'] = pointaggregate_df.groupby(['チーム'])['得点'].cumsum()
 
     return pointaggregate_df
 
@@ -338,7 +338,7 @@ def create_point_aggregate_df(schedule_df, current_year):
 def get_ranking_data_for_prediction(combined_ranking_df, league):
     """指定されたリーグの順位データを {チーム名: 順位} の辞書形式で返す"""
     if combined_ranking_df.empty: return {}
-    league_df = combined_ranking_df[combined_ranking_df['大会'] == league].copy() 
+    league_df = combined_ranking_df[combined_ranking_df['大会'] == league].copy()
     if '順位' in league_df.columns and 'チーム' in league_df.columns:
         league_df.loc[:, '順位'] = pd.to_numeric(league_df['順位'], errors='coerce')
         return league_df.dropna(subset=['順位']).set_index('チーム')['順位'].to_dict()
@@ -349,7 +349,7 @@ def calculate_recent_form(pointaggregate_df, team, league):
     if pointaggregate_df.empty: return 0
     
     team_results = pointaggregate_df[
-        (pointaggregate_df['大会'] == league) & 
+        (pointaggregate_df['大会'] == league) &
         (pointaggregate_df['チーム'] == team)
     ]
     # 最新の5試合を取得し、勝点を合計
