@@ -8,7 +8,7 @@ import matplotlib.dates as mdates
 import re
 import unicodedata 
 from io import StringIO 
-import numpy as np # 新たにnumpyをインポート
+import numpy as np 
 
 # --- 日本語フォント設定の強化 (変更なし) ---
 try:
@@ -66,7 +66,7 @@ LEAGUE_NAME_MAPPING = {
 }
 
 # --------------------------------------------------------------------------
-# チーム名マスタの定義と初期化 (変更なし - ハードコード部分)
+# チーム名マスタの定義と初期化 (変更なし)
 # --------------------------------------------------------------------------
 # キー: 略称や揺れのある表記 / 値: 正規名称
 TEAM_NAME_MAPPING = {
@@ -237,7 +237,7 @@ def scrape_schedule_data(url):
         return None
 
 # --------------------------------------------------------------------------
-# データ加工関数 (日付パースをさらに堅牢化 - 変更なし)
+# データ加工関数
 # --------------------------------------------------------------------------
 def parse_match_date(date_str, year):
     """
@@ -255,19 +255,14 @@ def parse_match_date(date_str, year):
     
     if match:
         date_part = match.group(1).strip()
-        
-        # %yは2桁の年（例: 25 -> 2025）としてパースすることを指示
         parse_format = '%y/%m/%d' 
         
         try:
             # 3. パースを試みる
             parsed_date = pd.to_datetime(date_part, format=parse_format, errors='coerce') 
             
-            # 4. 年度のチェック: パースされた年が指定年度と一致するか確認
-            # Jリーグデータの日付は年度がずれることがあるため、ここでは緩めにチェック（ただし日付の妥当性は確保）
+            # 4. 年度のチェック
             if pd.isna(parsed_date) or parsed_date.year != year:
-                 # 2桁年でパースした結果、西暦が指定年度と異なっていたら破棄
-                 # 例: 2024年のデータを見ていて、25/02/23が2025年としてパースされた場合
                  return pd.NaT
             
             return parsed_date
@@ -294,7 +289,7 @@ def create_point_aggregate_df(schedule_df, current_year):
     
     df.loc[:, ['得点H', '得点A']] = df['スコア'].str.split('-', expand=True).astype(int)
 
-    # 日付のクリーニングとパース (強化された関数を使用)
+    # 日付のクリーニングとパース
     df.loc[:, '試合日_parsed'] = df['試合日'].apply(lambda x: parse_match_date(x, current_year))
     
     # パースに成功した行のみを保持
@@ -306,7 +301,7 @@ def create_point_aggregate_df(schedule_df, current_year):
         logging.info("create_point_aggregate_df: 日付が有効なデータが見つかりませんでした。")
         return pd.DataFrame()
 
-    # --- 集計ロジック (変更なし) ---
+    # --- 集計ロジック ---
     home_df = df.rename(columns={'ホーム': 'チーム', 'アウェイ': '相手', '得点H': '得点', '得点A': '失点'})
     home_df.loc[:, '得失差'] = home_df['得点'] - home_df['失点']
     home_df.loc[:, '勝敗'] = home_df.apply(lambda row: '勝' if row['得点'] > row['失点'] else ('分' if row['得点'] == row['失点'] else '敗'), axis=1)
@@ -322,10 +317,17 @@ def create_point_aggregate_df(schedule_df, current_year):
     away_df = away_df[['大会', '試合日', 'チーム', '対戦相手', '勝敗', '得点', '失点', '得失差', '勝点']]
 
     pointaggregate_df = pd.concat([home_df, away_df], ignore_index=True)
+    
+    # 【修正1の対応】 連結後のデータ型を確実にDatetimeに統一
+    pointaggregate_df.loc[:, '試合日'] = pd.to_datetime(pointaggregate_df['試合日'], errors='coerce')
+    pointaggregate_df.dropna(subset=['試合日'], inplace=True)
+    
     pointaggregate_df = pointaggregate_df.sort_values(by=['試合日'], ascending=True)
     
-    # ここで累積勝点を計算し、累積勝点をキーにランキング変動グラフを作成する
+    # 累積勝点、累積得失点差、累積総得点を計算（順位決定基準のため）
     pointaggregate_df.loc[:, '累積勝点'] = pointaggregate_df.groupby(['チーム'])['勝点'].cumsum()
+    pointaggregate_df.loc[:, '累積得失点差'] = pointaggregate_df.groupby(['チーム'])['得失差'].cumsum() 
+    pointaggregate_df.loc[:, '累積総得点'] = pointaggregate_df.groupby(['チーム'])['得点'].cumsum()    
 
     return pointaggregate_df
 
@@ -333,7 +335,7 @@ def create_point_aggregate_df(schedule_df, current_year):
 # --------------------------------------------------------------------------
 # 予測用ヘルパー関数 (変更なし)
 # --------------------------------------------------------------------------
-
+# ... (get_ranking_data_for_prediction, calculate_recent_form, predict_match_outcome の定義は変更なし) ...
 def get_ranking_data_for_prediction(combined_ranking_df, league):
     """指定されたリーグの順位データを {チーム名: 順位} の辞書形式で返す"""
     if combined_ranking_df.empty: return {}
@@ -355,7 +357,6 @@ def calculate_recent_form(pointaggregate_df, team, league):
     recent_5_games = team_results.sort_values(by='試合日', ascending=False).head(5)
     return recent_5_games['勝点'].sum()
 
-# ... (predict_match_outcome 関数は変更なし) ...
 def predict_match_outcome(home_team, away_team, selected_league, current_year, combined_ranking_df, pointaggregate_df):
     """ルールベースで勝敗を予測する (順位差、調子、ホームアドバンテージを使用)"""
     # データの存在チェック
@@ -424,7 +425,6 @@ try:
         st.session_state.current_year = current_year 
 
         # --- データの取得 (キャッシュを利用) ---
-        # (URL生成とデータ取得ロジックは変更なし)
         ranking_urls = {
             'J1': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%91%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=651&competitionSectionId=0&search=search',
             'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=655&competitionSectionId=0&search=search',
@@ -578,7 +578,10 @@ try:
                     
                     # 表示用のDFを作成
                     display_df = recent_5_games[['試合日', '対戦相手', '勝敗', '得点', '失点', '勝点']].copy()
-                    display_df['試合日'] = display_df['試合日'].dt.strftime('%m/%d')
+                    
+                    # 【修正1の対応】: Datetime型が保証されているため、そのままdtアクセスを使用
+                    display_df.loc[:, '試合日'] = display_df['試合日'].dt.strftime('%m/%d')
+                    
                     display_df.rename(columns={'得点': '自チーム得点', '失点': '失点'}, inplace=True)
                     
                     st.info(f"✅ 直近5試合の合計獲得勝点: **{recent_form_points}点** (最高15点)")
@@ -609,7 +612,7 @@ try:
                     st.stop()
                 
                 
-                # --- 順位変動ロジック (試合日ベースの動的集計) ---
+                # --- 順位変動ロジック (試合日ベースの動的集計 - 修正2: 順位決定基準の適用) ---
                 
                 # 1. リーグ全体の試合日を取得
                 all_match_dates = filtered_df_rank['試合日'].sort_values().unique()
@@ -625,17 +628,25 @@ try:
                     
                     if df_upto_date.empty: continue
                     
-                    # 各チームの、その日付時点での最新の累積勝点を取得
-                    # 累積勝点はソート順に計算されているため、最新の試合日の累積勝点が現在の勝点となる
-                    latest_points_upto_date = df_upto_date.groupby('チーム')['累積勝点'].max().reset_index()
+                    # 4. 各チームの最新の累積統計を取得
+                    # 累積値の最大値が、そのチームのその日付時点での最終的な累積値となる
+                    latest_stats_upto_date = df_upto_date.groupby('チーム')[['累積勝点', '累積得失点差', '累積総得点']].max().reset_index()
 
-                    # 4. 勝点順にランキング
-                    if not latest_points_upto_date.empty:
-                        # 勝点が多い方が順位が上（値が小さい）になるように降順で順位付け
-                        latest_points_upto_date['Rank'] = latest_points_upto_date['累積勝点'].rank(method='min', ascending=False)
+                    if not latest_stats_upto_date.empty:
+                        # 【修正2の対応】 Jリーグの順位決定基準を考慮した複合スコアを作成
+                        # 基準: 1.勝点 > 2.得失点差 > 3.総得点
+                        # スコアが大きいほど上位になるように、大きな重み付けを行う
+                        latest_stats_upto_date['Weighted_Score'] = (
+                            latest_stats_upto_date['累積勝点'] * 1e9 + 
+                            latest_stats_upto_date['累積得失点差'] * 1e6 + 
+                            latest_stats_upto_date['累積総得点']
+                        )
+                        
+                        # Weighted_Scoreに基づいてランキングを計算 (値が大きい方が1位なので ascending=False)
+                        latest_stats_upto_date['Rank'] = latest_stats_upto_date['Weighted_Score'].rank(method='min', ascending=False).astype(int)
                         
                         # 5. 結果を履歴DFに格納
-                        for index, row in latest_points_upto_date.iterrows():
+                        for index, row in latest_stats_upto_date.iterrows():
                             rank_history_df.loc[current_date, row['チーム']] = row['Rank']
 
                 # 6. データの穴埋め（前日と同じ順位を埋める - 試合のない日も前日順位を継続）
