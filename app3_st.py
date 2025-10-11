@@ -8,13 +8,42 @@ import matplotlib.ticker as ticker
 import matplotlib.dates as mdates
 import re
 
-# --- 日本語フォント設定 ---
+# --- 日本語フォント設定の強化 ---
 try:
-    plt.rcParams['axes.unicode_minus'] = False
-    st.info("※日本語フォントはデプロイ環境で利用できない可能性があります。グラフの日本語が文字化けする場合はご容赦ください。")
+    # 候補となる日本語フォント名のリスト (一般的なLinux, macOS, Windowsのフォント)
+    # IPAexGothicは多くのLinux環境でパッケージとして提供されやすいため優先度高
+    font_candidates = ['IPAexGothic', 'Noto Sans CJK JP', 'Hiragino Maru Gothic Pro', 'MS Gothic', 'BIZ UDGothic', 'Yu Gothic']
+    
+    font_path = None
+    font_name = None
+    
+    for candidate in font_candidates:
+        try:
+            # システム内でフォントを探す
+            font_path = fm.findfont(candidate, fontext='ttf')
+            if font_path:
+                # パスが見つかったらそのフォント名を取得
+                font_name = fm.FontProperties(fname=font_path).get_name()
+                break # 見つかったのでループを抜ける
+        except Exception:
+            continue
+            
+    if font_name:
+        # フォント設定を適用
+        plt.rcParams['font.family'] = font_name
+        plt.rcParams['axes.unicode_minus'] = False # マイナス記号の文字化け防止
+        st.info(f"✅ 日本語フォント **{font_name}** を設定しました。")
+    else:
+        # どのフォントも見つからなかった場合
+        plt.rcParams['font.family'] = 'sans-serif'
+        plt.rcParams['axes.unicode_minus'] = False
+        st.warning("⚠️ システム内で日本語フォントが見つかりませんでした。グラフの日本語が文字化けする可能性があります。")
+        st.caption("【解決策】環境にIPAexGothicやNoto Sans CJK JPなどのフォントをインストールするか、フォントファイルを指定してください。")
+
 except Exception as e:
-    st.warning(f"フォント設定中に予期せぬエラーが発生しました: {e}。デフォルトフォントを使用します。")
+    st.error(f"致命的なフォント設定エラーが発生しました: {e}。デフォルトフォントを使用します。")
     plt.rcParams['axes.unicode_minus'] = False
+    plt.rcParams['font.family'] = 'sans-serif'
 
 # --- ログ設定 ---
 logging.basicConfig(
@@ -180,7 +209,8 @@ def create_point_aggregate_df(schedule_df, current_year): # current_yearを引�
                 return pd.to_datetime(date_str, format='%Y/%m/%d') # 'YYYY/MM/DD'
             except ValueError:
                 try:
-                    return pd.to_datetime(f'{year}/{date_str}', format='%Y/%m/%d') # 'MM/DD' + year
+                    # 'MM/DD' の形式を補完
+                    return pd.to_datetime(f'{year}/{date_str.strip()}', format='%Y/%m/%d', errors='ignore') 
                 except ValueError:
                     return pd.NaT
     
@@ -258,7 +288,7 @@ try:
                 st.error("順位表データを結合できませんでした。")
         
         if not ranking_data_available:
-            st.warning("現在、Jリーグ公式サイトからの順位表データの取得に問題が発生しています。時間を置いて再度お試しください。")
+            st.warning("現在、Jリーグ公式サイトからの順位表データの取得に問題が発生しているか、データがありません。")
 
         schedule_df = scrape_schedule_data(schedule_url) # 日程表データはここで取得し、内部で正規化済み
         
@@ -370,12 +400,14 @@ try:
                 min_date = filtered_df_rank['試合日'].min()
                 max_date = filtered_df_rank['試合日'].max()
                 
+                # グラフのX軸（日付）の基準点を計算
                 start_monday_candidate = min_date - pd.to_timedelta(min_date.weekday(), unit='D')
                 if start_monday_candidate < min_date:
                     start_monday = start_monday_candidate + pd.to_timedelta(7, unit='D')
                 else:
                     start_monday = start_monday_candidate
                 
+                # 毎週月曜日の日付範囲を作成
                 weekly_mondays = pd.date_range(start=start_monday, end=max_date + pd.to_timedelta(7, unit='D'), freq='W-MON')
                 
                 weekly_rank_data = pd.DataFrame(index=weekly_mondays)
@@ -385,11 +417,13 @@ try:
                         filtered_df_rank['チーム'] == team
                     ].set_index('試合日')['累積勝点']
                     
+                    # 毎週月曜日に合わせて累積勝点を補間 (ffill: 直前の有効な値で埋める)
                     team_weekly_points = team_cumulative_points.reindex(weekly_mondays, method='ffill')
                     weekly_rank_data[team] = team_weekly_points
                 
                 weekly_rank_data = weekly_rank_data.fillna(0)
 
+                # 勝点に基づいて順位を計算 (勝点が多いほど順位が高い=ランク値が低い)
                 weekly_rank_df_rank = weekly_rank_data.rank(axis=1, ascending=False, method='min')
                 
                 fig, ax = plt.subplots(figsize=(12, 8))
@@ -405,7 +439,7 @@ try:
                 if all_plotted_rank_data:
                     num_teams_in_league = len(all_teams_in_selected_league)
                     ax.set_yticks(range(1, num_teams_in_league + 1)) 
-                    ax.invert_yaxis()
+                    ax.invert_yaxis() # 順位は低い方が上なのでY軸を反転
                     ax.set_ylim(num_teams_in_league + 1, 0)
                 else:
                     st.warning("選択したチームの順位データがありません。")
@@ -418,7 +452,8 @@ try:
                 
                 ax.legend(title="チーム", loc='best')
                 
-                ax.xaxis.set_major_locator(mdates.DayLocator(interval=14))
+                # X軸の日付表示形式を設定
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=14)) # 2週間ごと
                 ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
                 
                 plt.xticks(rotation=90)
