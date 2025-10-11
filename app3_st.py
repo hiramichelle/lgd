@@ -600,9 +600,9 @@ try:
                 all_teams_in_selected_league = filtered_df_rank['チーム'].unique()
                 
                 selected_teams_rank_for_chart = st.multiselect(
-                    'グラフ表示チームを選択してください (複数選択可):', 
-                    all_teams_in_selected_league, 
-                    default=[selected_team_sidebar_viewer] if selected_team_sidebar_viewer in all_teams_in_selected_league else all_teams_in_selected_league[:1], 
+                    'グラフ表示チームを選択してください (複数選択可):',
+                    all_teams_in_selected_league,
+                    default=[selected_team_sidebar_viewer] if selected_team_sidebar_viewer in all_teams_in_selected_league else all_teams_in_selected_league[:1],
                     key='rank_team_multiselect_viewer'
                 )
                 
@@ -636,8 +636,8 @@ try:
                         # 基準: 1.勝点 > 2.得失点差 > 3.総得点
                         # スコアが大きいほど上位になるように、大きな重み付けを行う
                         latest_stats_upto_date['Weighted_Score'] = (
-                            latest_stats_upto_date['累積勝点'] * 1e9 + 
-                            latest_stats_upto_date['累積得失点差'] * 1e6 + 
+                            latest_stats_upto_date['累積勝点'] * 1e9 +
+                            latest_stats_upto_date['累積得失点差'] * 1e6 +
                             latest_stats_upto_date['累積総得点']
                         )
                         
@@ -649,7 +649,7 @@ try:
                             rank_history_df.loc[current_date, row['チーム']] = row['Rank']
 
                 # 6. データの穴埋め（前日と同じ順位を埋める - 試合のない日も前日順位を継続）
-                rank_history_df = rank_history_df.ffill() 
+                rank_history_df = rank_history_df.ffill()
                 
                 # --- グラフ描画 ---
                 fig, ax = plt.subplots(figsize=(12, 8))
@@ -668,7 +668,7 @@ try:
 
                 # リーグのチーム数に基づいてY軸を設定
                 num_teams_in_league = len(all_teams)
-                ax.set_yticks(range(1, num_teams_in_league + 1)) 
+                ax.set_yticks(range(1, num_teams_in_league + 1))
                 ax.invert_yaxis() # 順位は小さいほど上（グラフの上）
                 ax.set_ylim(num_teams_in_league + 1, 0)
                 
