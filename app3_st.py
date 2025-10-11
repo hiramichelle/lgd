@@ -255,11 +255,11 @@ def parse_match_date(date_str, year):
     
     if match:
         date_part = match.group(1).strip()
-        parse_format = '%y/%m/%d' 
+        parse_format = '%y/%m/%d'
         
         try:
             # 3. パースを試みる
-            parsed_date = pd.to_datetime(date_part, format=parse_format, errors='coerce') 
+            parsed_date = pd.to_datetime(date_part, format=parse_format, errors='coerce')
             
             # 4. 年度のチェック
             if pd.isna(parsed_date) or parsed_date.year != year:
@@ -271,8 +271,8 @@ def parse_match_date(date_str, year):
     
     return pd.NaT
 
-@st.cache_data(ttl=3600) 
-def create_point_aggregate_df(schedule_df, current_year): 
+@st.cache_data(ttl=3600)
+def create_point_aggregate_df(schedule_df, current_year):
     """日程表データから、チームごとの試合結果を集計するDataFrameを作成"""
     if schedule_df is None or schedule_df.empty:
         logging.info("create_point_aggregate_df: 入力schedule_dfがNoneまたは空です。")
