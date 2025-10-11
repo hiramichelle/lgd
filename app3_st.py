@@ -523,10 +523,10 @@ try:
             
             is_point_aggregate_available = not st.session_state.pointaggregate_df.empty
             
-            data_type_options = ["日程表"] 
-            if is_point_aggregate_available: 
+            data_type_options = ["日程表"]
+            if is_point_aggregate_available:
                 data_type_options.extend(["直近5試合", "順位変動グラフ"])
-            if st.session_state.ranking_data_available and not st.session_state.combined_ranking_df.empty: 
+            if st.session_state.ranking_data_available and not st.session_state.combined_ranking_df.empty:
                 data_type_options.insert(0, "順位表")
             
             default_index = data_type_options.index("順位表") if "順位表" in data_type_options else 0
