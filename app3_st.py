@@ -10,7 +10,6 @@ import re
 
 # --- 日本語フォント設定の強化 ---
 try:
-    # 候補となる日本語フォント名のリスト (一般的なLinux, macOS, Windowsのフォント)
     font_candidates = ['IPAexGothic', 'Noto Sans CJK JP', 'Hiragino Maru Gothic Pro', 'MS Gothic', 'BIZ UDGothic', 'Yu Gothic']
     
     font_path = None
@@ -18,26 +17,21 @@ try:
     
     for candidate in font_candidates:
         try:
-            # システム内でフォントを探す
             font_path = fm.findfont(candidate, fontext='ttf')
             if font_path:
-                # パスが見つかったらそのフォント名を取得
                 font_name = fm.FontProperties(fname=font_path).get_name()
-                break # 見つかったのでループを抜ける
+                break
         except Exception:
             continue
             
     if font_name:
-        # フォント設定を適用
         plt.rcParams['font.family'] = font_name
-        plt.rcParams['axes.unicode_minus'] = False # マイナス記号の文字化け防止
+        plt.rcParams['axes.unicode_minus'] = False
         st.info(f"✅ 日本語フォント **{font_name}** を設定しました。")
     else:
-        # どのフォントも見つからなかった場合
         plt.rcParams['font.family'] = 'sans-serif'
         plt.rcParams['axes.unicode_minus'] = False
         st.warning("⚠️ システム内で日本語フォントが見つかりませんでした。グラフの日本語が文字化けする可能性があります。")
-        st.caption("【解決策】環境にIPAexGothicやNoto Sans CJK JPなどのフォントをインストールするか、フォントファイルを指定してください。")
 
 except Exception as e:
     st.error(f"致命的なフォント設定エラーが発生しました: {e}。デフォルトフォントを使用します。")
@@ -53,14 +47,45 @@ logging.basicConfig(
 logging.info("--- アプリケーション開始 ---")
 
 # --------------------------------------------------------------------------
-# ヘルパー関数: リーグ名・チーム名を正規化する
+# ヘルパー関数: リーグ名・チーム名を正規化する (マスタ機能追加)
 # --------------------------------------------------------------------------
+# チーム名マスタ (略称や表記揺れを正式名称に統一するための辞書)
+TEAM_NAME_MAPPING = {
+    # '略称/揺れ' : '正規名称'
+    '浦和': '浦和レッズ',
+    '鹿島': '鹿島アントラーズ',
+    '横浜FM': '横浜F・マリノス', # 横浜Ｆ・マリノスの半角/全角対応
+    'FC東京': 'FC東京',
+    'F東京': 'FC東京',
+    '柏': '柏レイソル',
+    '神戸': 'ヴィッセル神戸',
+    'G大阪': 'ガンバ大阪',
+    'C大阪': 'セレッソ大阪',
+    '名古屋': '名古屋グランパス',
+    '札幌': '北海道コンサドーレ札幌',
+    '広島': 'サンフレッチェ広島',
+    '鳥栖': 'サガン鳥栖',
+    '川崎F': '川崎フロンターレ',
+    '湘南': '湘南ベルマーレ',
+    '新潟': 'アルビレックス新潟',
+    '京都': '京都サンガF.C.',
+    '磐田': 'ジュビロ磐田',
+    '福岡': 'アビスパ福岡',
+    '横浜C': '横浜FC', # 例として追加
+    # 必要に応じて他のJ2/J3チームの略称も追加してください
+}
+
+
 def normalize_j_name(name):
-    """Jリーグ名やチーム名を半角に統一する"""
+    """Jリーグ名やチーム名を半角に統一し、略称を正式名称にマッピングする"""
     if isinstance(name, str):
+        # 1. 文字レベルの正規化 (既存のロジックを強化)
         normalized = name.translate(str.maketrans('１２３', '123')).replace('　', ' ').strip()
-        normalized = normalized.replace('Ｊ', 'J')
-        return normalized
+        normalized = normalized.replace('Ｊ', 'J').replace('ＦＣ', 'FC').replace('F・マリノス', 'F・マリノス') # 全角を半角に、F.C.表記揺れを統一
+        
+        # 2. チーム名マッピング（マスタ機能）を適用
+        # 変換後の正規化名でマッピング辞書を検索し、見つからなければそのまま返す
+        return TEAM_NAME_MAPPING.get(normalized, normalized)
     return name
 
 # --------------------------------------------------------------------------
@@ -77,7 +102,6 @@ def scrape_ranking_data(url):
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         
-        # '順位'をマッチ条件に追加して確実に順位表を取得
         dfs = pd.read_html(response.text, flavor='lxml', header=0, match='順位')
         
         if not dfs:
@@ -85,21 +109,19 @@ def scrape_ranking_data(url):
             return None
         df = dfs[0]
         logging.info(f"順位表スクレイピング成功。DataFrameの形状: {df.shape}")
+        
         if '備考' in df.columns:
             df = df.drop(columns=['備考'])
         
+        # --- チーム名正規化の適用 ---
+        if 'チーム' in df.columns:
+            df['チーム'] = df['チーム'].apply(normalize_j_name)
+        # ----------------------------
+            
         return df
     except requests.exceptions.HTTPError as errh:
         logging.error(f"HTTPエラーが発生: {errh}")
         st.error(f"順位表データ取得エラー: HTTPエラー {errh.response.status_code}")
-        return None
-    except requests.exceptions.ConnectionError as errc:
-        logging.error(f"接続エラーが発生: {errc}")
-        st.error(f"順位表データ取得エラー: 接続に失敗しました。")
-        return None
-    except requests.exceptions.Timeout as errt:
-        logging.error(f"タイムアウトエラーが発生: {errt}")
-        st.error(f"順位表データ取得エラー: タイムアウトしました。")
         return None
     except requests.exceptions.RequestException as err:
         logging.error(f"リクエストエラーが発生: {err}")
@@ -141,31 +163,22 @@ def scrape_schedule_data(url):
             
         df = df[cols_to_keep]
 
-        # 大会名とチーム名を正規化
+        # --- 大会名とチーム名を正規化の適用 ---
         if '大会' in df.columns:
-            df['大会'] = df['大会'].apply(normalize_j_name)
+            # 大会名にはチームマッピングを適用しないよう、文字正規化のみを適用
+            df['大会'] = df['大会'].apply(lambda x: normalize_j_name(x) if x not in TEAM_NAME_MAPPING else x)
+
         if 'ホーム' in df.columns:
             df['ホーム'] = df['ホーム'].apply(normalize_j_name)
         if 'アウェイ' in df.columns:
             df['アウェイ'] = df['アウェイ'].apply(normalize_j_name)
+        # ------------------------------------
 
         return df
         
-    except requests.exceptions.HTTPError as errh:
-        logging.error(f"HTTPエラーが発生: {errh}")
-        st.error(f"日程表データ取得エラー: HTTPエラー {errh.response.status_code}")
-        return None
-    except requests.exceptions.ConnectionError as errc:
-        logging.error(f"接続エラーが発生: {errc}")
-        st.error(f"日程表データ取得エラー: 接続に失敗しました。")
-        return None
-    except requests.exceptions.Timeout as errt:
-        logging.error(f"タイムアウトエラーが発生: {errt}")
-        st.error(f"日程表データ取得エラー: タイムアウトしました。")
-        return None
     except requests.exceptions.RequestException as err:
         logging.error(f"リクエストエラーが発生: {err}")
-        st.error(f"日程表データ取得エラー: 不明なリクエストエラー。")
+        st.error(f"日程表データ取得エラー: {err}")
         return None
     except Exception as e:
         logging.error(f"日程表スクレイピング中に予期せぬエラーが発生: {e}", exc_info=True)
@@ -203,18 +216,17 @@ def create_point_aggregate_df(schedule_df, current_year): # current_yearを引�
         if pd.isna(date_str) or not isinstance(date_str, str):
             return pd.NaT
         try:
-            return pd.to_datetime(date_str, format='%y/%m/%d') # 'YY/MM/DD'
+            return pd.to_datetime(date_str, format='%y/%m/%d')
         except ValueError:
             try:
-                return pd.to_datetime(date_str, format='%Y/%m/%d') # 'YYYY/MM/DD'
+                return pd.to_datetime(date_str, format='%Y/%m/%d')
             except ValueError:
                 try:
-                    # 'MM/DD' の形式を補完
                     return pd.to_datetime(f'{year}/{date_str.strip()}', format='%Y/%m/%d', errors='coerce') 
                 except ValueError:
                     return pd.NaT
     
-    df['試合日'] = df['試合日'].apply(lambda x: parse_match_date(x, current_year)) # ここで引数を使用
+    df['試合日'] = df['試合日'].apply(lambda x: parse_match_date(x, current_year))
     
     df.dropna(subset=['試合日'], inplace=True)
     logging.info(f"create_point_aggregate_df: 日付パース後の行数: {len(df)} (除外: {initial_rows - len(df)})")
@@ -248,7 +260,7 @@ def create_point_aggregate_df(schedule_df, current_year): # current_yearを引�
 
 
 # --------------------------------------------------------------------------
-# 新規: 予測用ヘルパー関数
+# 予測用ヘルパー関数
 # --------------------------------------------------------------------------
 
 def get_ranking_data_for_prediction(combined_ranking_df, league):
@@ -273,6 +285,7 @@ def calculate_recent_form(pointaggregate_df, team, league):
     if pointaggregate_df.empty:
         return 0
     
+    # ここで team 名は正規化されている前提
     team_results = pointaggregate_df[
         (pointaggregate_df['大会'] == league) & 
         (pointaggregate_df['チーム'] == team)
@@ -304,7 +317,6 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
 
     # --- 1. 順位スコア ---
     # ランキングは小さい値(1位)ほど強い。順位が高い方がスコアが低くなるように調整。
-    # スコア計算例: 5位 vs 15位 -> (15位 - 5位) * 1.5 = +15点 (5位チームが有利)
     rank_score_H = (ranking[away_team] - ranking[home_team]) * WEIGHT_RANK
     
     # --- 2. 直近の調子スコア ---
@@ -367,8 +379,7 @@ try:
             try:
                 for league, df_val in ranking_dfs_raw.items():
                     if df_val is not None:
-                        if 'チーム' in df_val.columns:
-                            df_val['チーム'] = df_val['チーム'].apply(normalize_j_name)
+                        # チーム名正規化はscrape_ranking_data内で実行済み
                         df_val['大会'] = normalize_j_name(league)
                 combined_ranking_df = pd.concat(valid_ranking_dfs, ignore_index=True)
                 ranking_data_available = True
@@ -387,6 +398,7 @@ try:
         schedule_df = scrape_schedule_data(schedule_url)
         st.session_state.schedule_df = schedule_df
         
+        # pointaggregate_dfの生成には、正規化されたschedule_dfを使用
         pointaggregate_df = create_point_aggregate_df(schedule_df, st.session_state.current_year)
         st.session_state.pointaggregate_df = pointaggregate_df
 
@@ -431,6 +443,7 @@ try:
             
             if schedule_df is not None and not schedule_df.empty and selected_league_sidebar_viewer in schedule_df['大会'].unique():
                 filtered_by_league_for_teams = schedule_df[schedule_df['大会'] == selected_league_sidebar_viewer]
+                # ここで取得されるチーム名は既に正規化済み
                 team_options.extend(pd.concat([filtered_by_league_for_teams['ホーム'], filtered_by_league_for_teams['アウェイ']]).unique())
                 
             team_options = sorted(list(set(team_options)))
@@ -476,10 +489,14 @@ try:
             st.subheader(f"{selected_team_sidebar_viewer} 直近5試合結果")
             pointaggregate_df = st.session_state.pointaggregate_df
             if not pointaggregate_df.empty:
+                # ここで team_results が正しく取得できるようになる
                 team_results = pointaggregate_df[(pointaggregate_df['大会'] == selected_league_sidebar_viewer) & (pointaggregate_df['チーム'] == selected_team_sidebar_viewer)]
                 recent_5_games = team_results.sort_values(by='試合日', ascending=False).head(5)
                 recent_5_games = recent_5_games.sort_values(by='試合日', ascending=True)
                 
+                if recent_5_games.empty:
+                     st.warning("このチームの試合結果がまだ集計されていません。またはマッピング辞書に不足があるかもしれません。")
+
                 recent_5_games['試合日'] = recent_5_games['試合日'].dt.strftime('%y%m%d')
                 
                 st.dataframe(recent_5_games[['試合日', '対戦相手', '勝敗', '得点', '失点', '勝点']])
@@ -576,7 +593,7 @@ try:
         # 予測対象の大会選択
         selected_league_predictor = st.selectbox('予測対象の大会を選択してください:', st.session_state.league_options, key='predictor_league_selectbox')
 
-        # 予測対象のチームリストを生成
+        # 予測対象のチームリストを生成 (ここは正規化されたチーム名が入っている)
         predictor_team_options = []
         if not st.session_state.combined_ranking_df.empty and selected_league_predictor in st.session_state.combined_ranking_df['大会'].unique():
             predictor_team_options.extend(st.session_state.combined_ranking_df[st.session_state.combined_ranking_df['大会'] == selected_league_predictor]['チーム'].unique())
@@ -592,12 +609,11 @@ try:
                 home_team = st.selectbox('🏠 ホームチームを選択:', predictor_team_options, index=0, key='predictor_home_team')
             
             with col_away:
-                # Awayチームの初期値をHomeと異なるように設定
                 initial_away_index = 1 if len(predictor_team_options) > 1 else 0
                 away_team = st.selectbox('✈️ アウェイチームを選択:', predictor_team_options, index=initial_away_index, key='predictor_away_team')
 
             with col_vs:
-                st.text("") # スペース調整
+                st.text("")
                 st.markdown("<h2 style='text-align: center; margin-top: 15px;'>VS</h2>", unsafe_allow_html=True)
             
             st.divider()
