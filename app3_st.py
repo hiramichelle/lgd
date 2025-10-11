@@ -4,11 +4,11 @@ import logging
 import requests
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-import matplotlib.ticker as ticker
 import matplotlib.dates as mdates
 import re
+import unicodedata # <--- NFKC正規化のために追加
 
-# --- 日本語フォント設定の強化 ---
+# --- 日本語フォント設定の強化 (変更なし) ---
 try:
     font_candidates = ['IPAexGothic', 'Noto Sans CJK JP', 'Hiragino Maru Gothic Pro', 'MS Gothic', 'BIZ UDGothic', 'Yu Gothic']
     
@@ -35,7 +35,7 @@ except Exception as e:
     plt.rcParams['axes.unicode_minus'] = False
     plt.rcParams['font.family'] = 'sans-serif'
 
-# --- ログ設定 ---
+# --- ログ設定 (変更なし) ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -44,35 +44,34 @@ logging.basicConfig(
 logging.info("--- アプリケーション開始 ---")
 
 # --------------------------------------------------------------------------
-# 大会名マスタの定義 (修正: キーを半角Jに統一)
+# 大会名マスタの定義 
 # --------------------------------------------------------------------------
-# 大会名マスタ: normalize_j_nameでＪ->Jに変換された後の文字列をキーとして定義します。
+# 大会名マスタ: normalize_j_nameでNFKC正規化された後の文字列をキーとして定義します。
 LEAGUE_NAME_MAPPING = {
-    # J1リーグ (キーはすべて半角J)
-    '明治安田J1リーグ': 'J1', # <- ＪをJに修正
-    '明治安田生命J1リーグ': 'J1', # <- ＪをJに修正
+    # J1リーグ (キーはすべて半角Jと半角数字)
+    '明治安田J1リーグ': 'J1',
+    '明治安田生命J1リーグ': 'J1',
     '明治安田J1': 'J1',
     'J1': 'J1',
-    # J2リーグ (キーはすべて半角J)
-    '明治安田J2リーグ': 'J2', # <- ＪをJに修正
-    '明治安田生命J2リーグ': 'J2', # <- ＪをJに修正
+    # J2リーグ (キーはすべて半角Jと半角数字)
+    '明治安田J2リーグ': 'J2',
+    '明治安田生命J2リーグ': 'J2',
     '明治安田J2': 'J2',
     'J2': 'J2',
-    # J3リーグ (キーはすべて半角J)
-    '明治安田J3リーグ': 'J3', # <- ＪをJに修正
-    '明治安田生命J3リーグ': 'J3', # <- ＪをJに修正
+    # J3リーグ (キーはすべて半角Jと半角数字)
+    '明治安田J3リーグ': 'J3',
+    '明治安田生命J3リーグ': 'J3',
     '明治安田J3': 'J3',
     'J3': 'J3',
     # ルヴァンカップなどその他の大会
     'ルヴァンカップ': 'ルヴァンカップ',
-    'JリーグYBCルヴァンカップ': 'ルヴァンカップ', # <- ＪをJに修正
+    'JリーグYBCルヴァンカップ': 'ルヴァンカップ',
     # その他の略称もカバー（必要に応じて追加）
 }
 
 # --------------------------------------------------------------------------
-# チーム名マスタの定義と初期化
+# チーム名マスタの定義と初期化 (変更なし)
 # --------------------------------------------------------------------------
-# チーム名マスタ (略称や表記揺れを正式名称に統一するための辞書)
 TEAM_NAME_MAPPING = {
     # J1主要チーム (略称)
     '浦和': '浦和レッズ',
@@ -103,29 +102,29 @@ TEAM_NAME_MAPPING = {
     '仙台': 'ベガルタ仙台', 
 }
 
-# 既存のチーム名マスタに自己マッピングを保証
 for canonical_name in list(TEAM_NAME_MAPPING.values()):
     if canonical_name not in TEAM_NAME_MAPPING:
         TEAM_NAME_MAPPING[canonical_name] = canonical_name
 
 # --------------------------------------------------------------------------
-# ヘルパー関数: リーグ名・チーム名を正規化する (LOGIC NO CHANGE, BUT MAPPING KEYS ARE FIXED)
+# ヘルパー関数: リーグ名・チーム名を正規化する (NFKC正規化を導入)
 # --------------------------------------------------------------------------
 def normalize_j_name(name):
-    """Jリーグ名やチーム名を半角に統一し、略称を正式名称にマッピングする"""
+    """Jリーグ名やチーム名を半角に統一し、略称を正式名称にマッピングする (NFKC強化)"""
     if isinstance(name, str):
-        # 1. 文字レベルの正規化 (全角/半角の揺れを吸収)
-        # Ｊ, ＦＣ, Ｆ・Ｃ などの全角文字を半角に統一
-        normalized = name.replace('Ｊ', 'J').replace('ＦＣ', 'FC').replace('Ｆ・Ｃ', 'FC')
+        # 1. 統一的な正規化 (NFKC: 全角英数字・記号・カタカナを半角に変換し、表記揺れを吸収)
+        normalized = unicodedata.normalize('NFKC', name)
+        
+        # 2. 個別の文字揺れの吸収 (NFKCでは吸収しきれない全角Jなどを確実に処理)
+        # Jリーグのサイトで多用される全角J/FCなどを半角に
+        normalized = normalized.replace('Ｊ', 'J').replace('ＦＣ', 'FC').replace('Ｆ・Ｃ', 'FC')
         normalized = normalized.replace('　', ' ').strip() # 全角スペース除去
         
-        # 2. 大会名マッピングを優先的に適用
-        # 大会名であれば、集計・フィルタリング用のシンプルな名称に「洗い替え」
-        # (LEAGUE_NAME_MAPPINGのキーがこのnormalizedの出力と一致するよう修正済み)
+        # 3. 大会名マッピングを適用
         if normalized in LEAGUE_NAME_MAPPING:
             return LEAGUE_NAME_MAPPING[normalized]
         
-        # 3. チーム名マッピング（マスタ機能）を適用
+        # 4. チーム名マッピング（マスタ機能）を適用
         return TEAM_NAME_MAPPING.get(normalized, normalized)
     return name
 
@@ -134,9 +133,7 @@ def normalize_j_name(name):
 # --------------------------------------------------------------------------
 @st.cache_data(ttl=3600) # 1時間キャッシュ
 def scrape_ranking_data(url):
-    """
-    Jリーグ公式サイトから順位表をスクレイピングし、**チーム名と大会名を正規化**する。
-    """
+    """Jリーグ公式サイトから順位表をスクレイピングし、**チーム名と大会名を正規化**する。"""
     logging.info(f"scrape_ranking_data: URL {url} からスクレイピング開始。")
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
@@ -166,9 +163,7 @@ def scrape_ranking_data(url):
 
 @st.cache_data(ttl=3600) # 1時間キャッシュ
 def scrape_schedule_data(url):
-    """
-    Jリーグ公式サイトから日程表をスクレイピングし、**チーム名と大会名を正規化**する。
-    """
+    """日程表をスクレイピングし、**チーム名と大会名を正規化**する。"""
     logging.info(f"scrape_schedule_data: URL {url} からスクレイピング開始。")
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
@@ -193,7 +188,7 @@ def scrape_schedule_data(url):
         if 'アウェイ' in df.columns:
             df['アウェイ'] = df['アウェイ'].apply(normalize_j_name)
         if '大会' in df.columns:
-            # ここで大会名が正しく J1, J2, J3 などに洗い替えられるはず
+            # NFKC正規化により、全角文字(例: Ｊ１)が半角文字(例: J1)に変換されることを期待
             df['大会'] = df['大会'].apply(normalize_j_name)
         # ------------------------------------
 
@@ -205,7 +200,7 @@ def scrape_schedule_data(url):
         return None
 
 # --------------------------------------------------------------------------
-# データ加工関数 (日付パースを堅牢化)
+# データ加工関数 (日付パースをさらに堅牢化)
 # --------------------------------------------------------------------------
 @st.cache_data(ttl=3600) # 1時間キャッシュ
 def create_point_aggregate_df(schedule_df, current_year): 
@@ -216,7 +211,7 @@ def create_point_aggregate_df(schedule_df, current_year):
 
     df = schedule_df.copy()
     
-    # スコア形式でフィルタリング
+    # スコア形式でフィルタリング (例: 1-0)
     df = df[df['スコア'].str.contains(r'^\d+-\d+$', na=False)]
     
     if df.empty:
@@ -225,19 +220,26 @@ def create_point_aggregate_df(schedule_df, current_year):
     
     df[['得点H', '得点A']] = df['スコア'].str.split('-', expand=True).astype(int)
 
-    # 日付のクリーニングとパース (修正: 正規表現を強化し、前後の空白や予期せぬ文字を削除)
-    # 例: "10/11(金) " -> "10/11"
-    df['試合日'] = df['試合日'].str.replace(r'\s*\(.+\)\s*', '', regex=True).str.strip()
-    
+    # 日付のクリーニングとパース (修正: MM/DD形式の文字列を確実に抽出する)
     def parse_match_date(date_str, year):
         if pd.isna(date_str) or not isinstance(date_str, str) or not date_str:
             return pd.NaT
+        
+        # \d+/\d+ (MM/DD形式)を抽出し、曜日や前後の空白を削除
+        # これにより、"10/11(金)" や "10/11" のいずれからでも "10/11" を抽出できる
+        match = re.search(r'(\d{1,2}/\d{1,2})', date_str) 
+        if not match:
+            return pd.NaT
+
+        date_only_str = match.group(1).strip()
+        
         try:
             # YYYY/MM/DD 形式でパースを試みる
-            return pd.to_datetime(f'{year}/{date_str.strip()}', format='%Y/%m/%d', errors='coerce') 
+            return pd.to_datetime(f'{year}/{date_only_str}', format='%Y/%m/%d', errors='coerce') 
         except ValueError:
             return pd.NaT
     
+    # Apply the robust date parsing function
     df['試合日'] = df['試合日'].apply(lambda x: parse_match_date(x, current_year))
     df.dropna(subset=['試合日'], inplace=True) # 日付のパースに失敗した行をここで削除
 
@@ -397,22 +399,22 @@ try:
         st.session_state.schedule_df = schedule_df
         
         # 集計DFの生成 (正規化されたチーム名と大会名を使って集計)
-        # 大会名と日付のパースが修正されたため、ここでデータが入るはず
         pointaggregate_df = create_point_aggregate_df(schedule_df, st.session_state.current_year)
         st.session_state.pointaggregate_df = pointaggregate_df
 
         # リーグオプションの生成
         league_options = []
-        # ランキングデータ（J1, J2, J3）
+        # 1. ランキングデータ（J1, J2, J3）: 半角の正規名称のみ
         if 'combined_ranking_df' in st.session_state and not st.session_state.combined_ranking_df.empty:
             league_options.extend(st.session_state.combined_ranking_df['大会'].unique())
-        # 日程表データ（これも正規化後のJ1, J2, J3など）
+        # 2. 日程表データ: 正規化後の大会名が入る (NFKCにより半角に統一されることを期待)
         if st.session_state.schedule_df is not None and not st.session_state.schedule_df.empty:
             schedule_league_options = st.session_state.schedule_df['大会'].unique()
             for l in schedule_league_options:
                 if l not in league_options:
                     league_options.append(l)
         
+        # プルダウンのオプションは、半角正規名称(J1, J2, J3)に統一されることを期待
         st.session_state.league_options = sorted(list(set(league_options)))
 
 
@@ -433,7 +435,7 @@ try:
         # サイドバーのデータビューア用選択肢
         with st.sidebar:
             st.header("データビューア設定")
-            # リーグ名が正規化されているため、プルダウンには統一名称（J1, J2など）のみが表示される
+            # リーグ名が正規化されているため、プルダウンには統一名称（J1, J2など）のみが表示されることを期待
             selected_league_sidebar_viewer = st.selectbox('表示したい大会を選択してください (ビューア用):', st.session_state.league_options, key='viewer_league_selectbox')
 
             # チーム選択プルダウン (正規化済みリストから生成されるため表記揺れは解消)
@@ -453,7 +455,6 @@ try:
             
             if not team_options:
                 st.warning(f"選択された大会 ({selected_league_sidebar_viewer}) のチーム情報が見つかりません。")
-                # ストップせずに、チームオプションがないことを警告して処理を進めます (後続の処理でエラーハンドリングされるため)
                 selected_team_sidebar_viewer = None
             else:
                 selected_team_sidebar_viewer = st.selectbox('表示したいチームを選択してください (ビューア用):', team_options, key='viewer_team_selectbox')
@@ -463,9 +464,10 @@ try:
             st.header("表示データ選択")
             
             data_type_options = ["日程表"] 
+            # pointaggregate_df が空でなければ、追加のオプションを表示
             if not st.session_state.pointaggregate_df.empty: 
-                # 集計DFが空でなくなった場合のみ、直近5試合とグラフのオプションを表示
                 data_type_options.extend(["直近5試合", "順位変動グラフ"])
+            # ランキングデータが利用可能なら、順位表を追加
             if st.session_state.ranking_data_available and not st.session_state.combined_ranking_df.empty: 
                  data_type_options.insert(0, "順位表")
             
@@ -477,6 +479,7 @@ try:
         if data_type == "順位表":
             st.subheader(f"{selected_league_sidebar_viewer} {st.session_state.current_year} 順位表")
             if st.session_state.ranking_data_available and not st.session_state.combined_ranking_df.empty:
+                # ランキングDFは手動で'大会'カラムが半角J1/J2/J3に設定されているため、ここで半角がフィルタされる
                 filtered_df = st.session_state.combined_ranking_df[st.session_state.combined_ranking_df['大会'] == selected_league_sidebar_viewer].drop(columns=['大会'])
                 st.dataframe(filtered_df)
             else:
@@ -486,7 +489,7 @@ try:
             st.subheader(f"{selected_league_sidebar_viewer} {st.session_state.current_year} 試合日程 ({selected_team_sidebar_viewer if selected_team_sidebar_viewer else '全試合'})")
             schedule_df = st.session_state.schedule_df
             if schedule_df is not None and not schedule_df.empty:
-                # フィルタリングに正規化済みの大会名とチーム名を使用
+                # 日程表の'大会'カラムはNFKC正規化を経ているため、半角J1/J2/J3でフィルタリングできるはず
                 league_filter = schedule_df['大会'] == selected_league_sidebar_viewer
                 if selected_team_sidebar_viewer:
                     team_filter = (schedule_df['ホーム'] == selected_team_sidebar_viewer) | (schedule_df['アウェイ'] == selected_team_sidebar_viewer)
@@ -520,6 +523,7 @@ try:
 
                     st.dataframe(recent_5_games[['試合日', '対戦相手', '勝敗', '得点', '失点', '勝点']])
                 else:
+                    # このエラーは、日付パースが成功しなかった場合にのみ表示されるはず
                     st.error("日程表データがないか、日付パースに失敗したため、直近5試合の集計ができませんでした。")
 
         elif data_type == "順位変動グラフ":
