@@ -579,6 +579,7 @@ try:
                     display_df = recent_5_games[['試合日', '対戦相手', '勝敗', '得点', '失点', '勝点']].copy()
                     
                     # 【修正1の対応】: Datetime型が保証されているため、そのままdtアクセスを使用
+                    display_df['試合日'] = pd.to_datetime(display_df['試合日'], errors='coerce')
                     display_df.loc[:, '試合日'] = display_df['試合日'].dt.strftime('%m/%d')
                     
                     display_df.rename(columns={'得点': '自チーム得点', '失点': '失点'}, inplace=True)
@@ -641,9 +642,14 @@ try:
                             latest_stats_upto_date['累積総得点']
                         )
                         
-                        # Weighted_Scoreに基づいてランキングを計算 (値が大きい方が1位なので ascending=False)
-                        latest_stats_upto_date['Rank'] = latest_stats_upto_date['Weighted_Score'].rank(method='min', ascending=False).astype(int)
-                        
+# app3_st.py (Line ~645) の修正
+# rank()の結果に含まれうるNaNを0で埋めてから整数に変換する
+                        latest_stats_upto_date['Rank'] = (
+                            latest_stats_upto_date['Weighted_Score']
+                            .rank(method='min', ascending=False)
+                            .fillna(0) # <-- 欠損値を0に置換
+                            .astype(int)
+                            )                        
                         # 5. 結果を履歴DFに格納
                         for index, row in latest_stats_upto_date.iterrows():
                             rank_history_df.loc[current_date, row['チーム']] = row['Rank']
