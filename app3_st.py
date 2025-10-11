@@ -198,8 +198,8 @@ def scrape_ranking_data(url):
         logging.error(f"順位表スクレイピング中に予期せぬエラーが発生: {e}", exc_info=True)
         st.error(f"順位表データ取得エラー: {e}")
         return None
-
-@st.cache_data(ttl=3600) 
+        
+@st.cache_data(ttl=3600)
 def scrape_schedule_data(url):
     """日程表をスクレイピングし、**チーム名と大会名を正規化**する。"""
     logging.info(f"scrape_schedule_data: URL {url} からスクレイピング開始。")
