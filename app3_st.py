@@ -374,10 +374,10 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
         return "情報不足", "選択されたチームの順位情報がまだありません。", "#ccc"
     
     # --- パラメータ設定 (影響度) ---
-    WEIGHT_RANK = 1.5   
-    WEIGHT_FORM = 1.0   
-    HOME_ADVANTAGE = 1.5 
-    DRAW_THRESHOLD = 3  
+    WEIGHT_RANK = 1.5
+    WEIGHT_FORM = 1.0
+    HOME_ADVANTAGE = 1.5
+    DRAW_THRESHOLD = 3
 
     # --- 1. 順位スコア ---
     rank_score_H = (ranking[away_team] - ranking[home_team]) * WEIGHT_RANK
