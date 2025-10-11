@@ -280,14 +280,24 @@ def create_point_aggregate_df(schedule_df, current_year):
 
     df = schedule_df.copy()
     
-    # スコア形式でフィルタリング (例: 1-0)
-    df = df[df['スコア'].str.contains(r'^\d+-\d+$', na=False)]
+    # 【✅ 修正2: スコアパースの堅牢化】
+    # 1. 全角ハイフンなどを半角ハイフンに統一し、前後スペースを除去
+    df.loc[:, 'スコア_cleaned'] = df['スコア'].astype(str).str.replace('ー', '-').str.strip()
+    
+    # 2. スコア形式でフィルタリング (例: 1-0)
+    df = df[df['スコア_cleaned'].str.contains(r'^\d+-\d+$', na=False)]
     
     if df.empty:
         logging.info("create_point_aggregate_df: スコア形式のデータが見つかりませんでした。")
         return pd.DataFrame()
     
-    df.loc[:, ['得点H', '得点A']] = df['スコア'].str.split('-', expand=True).astype(int)
+    # 3. スコアを分割し、to_numericで安全にintに変換
+    df[['得点H', '得点A']] = df['スコア_cleaned'].str.split('-', expand=True)
+    
+    # 文字列がNaNの場合も安全に0に置換してintに変換
+    df['得点H'] = pd.to_numeric(df['得点H'], errors='coerce').fillna(0).astype(int)
+    df['得点A'] = pd.to_numeric(df['得点A'], errors='coerce').fillna(0).astype(int)
+    # -----------------------------------------------------
 
     # 日付のクリーニングとパース
     df.loc[:, '試合日_parsed'] = df['試合日'].apply(lambda x: parse_match_date(x, current_year))
@@ -340,6 +350,7 @@ def get_ranking_data_for_prediction(combined_ranking_df, league):
     if combined_ranking_df.empty: return {}
     league_df = combined_ranking_df[combined_ranking_df['大会'] == league].copy()
     if '順位' in league_df.columns and 'チーム' in league_df.columns:
+        # 順位は既にメインロジックでintに変換されているが、念のためto_numeric
         league_df.loc[:, '順位'] = pd.to_numeric(league_df['順位'], errors='coerce')
         return league_df.dropna(subset=['順位']).set_index('チーム')['順位'].to_dict()
     return {}
@@ -354,6 +365,7 @@ def calculate_recent_form(pointaggregate_df, team, league):
     ]
     # 最新の5試合を取得し、勝点を合計
     recent_5_games = team_results.sort_values(by='試合日', ascending=False).head(5)
+    # 勝点がintであることを前提に合計
     return recent_5_games['勝点'].sum()
 
 def predict_match_outcome(home_team, away_team, selected_league, current_year, combined_ranking_df, pointaggregate_df):
@@ -380,6 +392,7 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     DRAW_THRESHOLD = 3
 
     # --- 1. 順位スコア ---
+    # 順位が数値として扱われるため、計算が正しく実行される
     rank_score_H = (ranking[away_team] - ranking[home_team]) * WEIGHT_RANK
     
     # --- 2. 直近の調子スコア ---
@@ -448,7 +461,20 @@ try:
             except ValueError as e:
                 logging.error(f"順位表データ結合エラー: {e}", exc_info=True)
                 st.error("順位表データを結合できませんでした。")
-        
+            
+            # --- ✅ 修正1: 順位表データ (combined_ranking_df) の型変換 ---
+            # 順位、勝敗数、得点、失点、勝点など、計算やプロットに使用する数値をintに変換
+            ranking_numeric_cols = [
+                '順位', '試合', '勝', '分', '負', '得点', '失点', '得失点差', '勝点'
+            ]
+            
+            for col in ranking_numeric_cols:
+                if col in combined_ranking_df.columns:
+                    combined_ranking_df[col] = pd.to_numeric(
+                        combined_ranking_df[col], errors='coerce'
+                    ).fillna(0).astype(int)
+            # ----------------------------------------------------------------
+
         if not ranking_data_available:
             st.warning("現在、順位表データが取得できていないか、データがありません。")
             st.session_state.combined_ranking_df = pd.DataFrame()
@@ -462,6 +488,7 @@ try:
         st.session_state.schedule_df = schedule_df
         
         # 集計DFの生成 (正規化されたチーム名と大会名を使って集計)
+        # ※ create_point_aggregate_df内でスコアのint変換も行う
         pointaggregate_df = create_point_aggregate_df(schedule_df, st.session_state.current_year)
         st.session_state.pointaggregate_df = pointaggregate_df
 
@@ -497,7 +524,7 @@ try:
             st.header("データビューア設定")
             selected_league_sidebar_viewer = st.selectbox('表示したい大会を選択してください (ビューア用):', st.session_state.league_options, key='viewer_league_selectbox')
 
-            # チーム選択プルダウン 
+            # チーム選択プルダウン 
             team_options = []
             combined_ranking_df = st.session_state.combined_ranking_df
             schedule_df = st.session_state.schedule_df
@@ -565,6 +592,7 @@ try:
                 st.subheader(f"🏟️ {selected_team_sidebar_viewer} の直近5試合結果")
                 pointaggregate_df = st.session_state.pointaggregate_df
                 
+                # 勝点カラムがint型になっているため、正常に集計される
                 team_results = pointaggregate_df[(pointaggregate_df['大会'] == selected_league_sidebar_viewer) & (pointaggregate_df['チーム'] == selected_team_sidebar_viewer)]
                 
                 # 試合日が降順（新しい順）でソートし、最新の5試合を取得
@@ -573,12 +601,12 @@ try:
                 if recent_5_games.empty:
                     st.warning(f"大会 **{selected_league_sidebar_viewer}** の **{selected_team_sidebar_viewer}** の試合結果がまだ集計されていません。")
                 else:
+                    # calculate_recent_form内で勝点(int)がSumされる
                     recent_form_points = calculate_recent_form(pointaggregate_df, selected_team_sidebar_viewer, selected_league_sidebar_viewer)
                     
                     # 表示用のDFを作成
                     display_df = recent_5_games[['試合日', '対戦相手', '勝敗', '得点', '失点', '勝点']].copy()
                     
-                    # 【修正1の対応】: Datetime型が保証されているため、そのままdtアクセスを使用
                     display_df['試合日'] = pd.to_datetime(display_df['試合日'], errors='coerce')
                     display_df.loc[:, '試合日'] = display_df['試合日'].dt.strftime('%m/%d')
                     
@@ -612,7 +640,7 @@ try:
                     st.stop()
                 
                 
-                # --- 順位変動ロジック (試合日ベースの動的集計 - 修正2: 順位決定基準の適用) ---
+                # --- 順位変動ロジック (試合日ベースの動的集計) ---
                 
                 # 1. リーグ全体の試合日を取得
                 all_match_dates = filtered_df_rank['試合日'].sort_values().unique()
@@ -629,27 +657,24 @@ try:
                     if df_upto_date.empty: continue
                     
                     # 4. 各チームの最新の累積統計を取得
-                    # 累積値の最大値が、そのチームのその日付時点での最終的な累積値となる
                     latest_stats_upto_date = df_upto_date.groupby('チーム')[['累積勝点', '累積得失点差', '累積総得点']].max().reset_index()
 
                     if not latest_stats_upto_date.empty:
-                        # 【修正2の対応】 Jリーグの順位決定基準を考慮した複合スコアを作成
-                        # 基準: 1.勝点 > 2.得失点差 > 3.総得点
-                        # スコアが大きいほど上位になるように、大きな重み付けを行う
+                        # Jリーグの順位決定基準を考慮した複合スコアを作成 (勝点 > 得失点差 > 総得点)
                         latest_stats_upto_date['Weighted_Score'] = (
                             latest_stats_upto_date['累積勝点'] * 1e9 +
                             latest_stats_upto_date['累積得失点差'] * 1e6 +
                             latest_stats_upto_date['累積総得点']
                         )
                         
-# app3_st.py (Line ~645) の修正
-# rank()の結果に含まれうるNaNを0で埋めてから整数に変換する
+                        # rank()の結果に含まれうるNaNを0で埋めてから整数に変換
                         latest_stats_upto_date['Rank'] = (
                             latest_stats_upto_date['Weighted_Score']
                             .rank(method='min', ascending=False)
                             .fillna(0) # <-- 欠損値を0に置換
                             .astype(int)
-                            )                        
+                            )
+                        
                         # 5. 結果を履歴DFに格納
                         for index, row in latest_stats_upto_date.iterrows():
                             rank_history_df.loc[current_date, row['チーム']] = row['Rank']
@@ -708,7 +733,7 @@ try:
         # 予測対象の大会選択
         selected_league_predictor = st.selectbox('予測対象の大会を選択してください:', st.session_state.league_options, key='predictor_league_selectbox')
 
-        # 予測対象のチームリストを生成 
+        # 予測対象のチームリストを生成 
         predictor_team_options = []
         if not st.session_state.combined_ranking_df.empty and selected_league_predictor in st.session_state.combined_ranking_df['大会'].unique():
             predictor_team_options.extend(st.session_state.combined_ranking_df[st.session_state.combined_ranking_df['大会'] == selected_league_predictor]['チーム'].unique())
@@ -747,19 +772,19 @@ try:
                     st.session_state.combined_ranking_df,
                     st.session_state.pointaggregate_df
                 )
-
+                
                 # 予測結果の表示
                 st.markdown(
                     f"""
-                    <div style="background-color: {color}; color: white; padding: 20px; border-radius: 10px; text-align: center; margin-top: 20px;">
-                        <h2>{result}</h2>
+                    <div style='background-color: {color}; padding: 20px; border-radius: 10px; color: black; text-align: center;'>
+                        <h3 style='margin: 0; color: white;'>{result}</h3>
                     </div>
-                    <p style="text-align: center; margin-top: 10px; color: #666;">{detail}</p>
+                    <p style='margin-top: 10px; text-align: center;'>{detail}</p>
                     """,
                     unsafe_allow_html=True
                 )
-# アプリケーション全体の例外処理
+
+
 except Exception as app_e:
-    logging.error(f"アプリケーションメインループで予期せぬエラーが発生: {app_e}", exc_info=True)
-    st.error("アプリケーションの実行中に予期せぬエラーが発生しました。")
-    st.stop()
+    logging.error(f"メインアプリケーションエラー: {app_e}", exc_info=True)
+    st.error(f"アプリケーションの実行中にエラーが発生しました: {app_e}")
