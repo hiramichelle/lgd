@@ -422,22 +422,6 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
         
     return result, detail, color
 
-# --------------------------------------------------------------------------
-# アプリケーション本体
-# --------------------------------------------------------------------------
-try:
-    st.title('📊 Jリーグデータビューア & 勝敗予測')
-
-    # --- サイドバーでのデータ取得・共通コンポーネントの処理 ---
-    
-    with st.sidebar:
-        st.header("共通設定")
-        years = list(range(2020, pd.Timestamp.now().year + 2))
-        current_year = st.selectbox("表示・予測する年度を選択してください:", years, index=years.index(pd.Timestamp.now().year), key='year_selector')
-        st.session_state.current_year = current_year
-
-# --- competitionIdマッピング (年度・リーグごと) ---
-# このテーブルを使用して、各年度のランキングURLを正確に取得
 COMPETITION_ID_MAPPING = {
     2025: {'J1': 651, 'J2': 655, 'J3': 657},
     2024: {'J1': 589, 'J2': 590, 'J3': 591},
@@ -463,17 +447,33 @@ def get_ranking_urls(year):
     
     ranking_urls = {}
     for league, comp_id in competition_ids.items():
+        league_num = league[1]  # 'J1' -> '1', 'J2' -> '2', 'J3' -> '3'
         ranking_urls[league] = (
             f"https://data.j-league.or.jp/SFRT01/"
             f"?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80"
             f"&competitionIdLabel=%E6%98%8E%E6%B2%BB%E5%AE%89%E7%94%B0"
-            f"%EF%BC%AA%EF%BC%9{ord(league[1]) - ord('0')}"  # J1->1, J2->2, J3->3
+            f"%EF%BC%AA%EF%BC%9{league_num}"
             f"%E3%83%AA%E3%83%BC%E3%82%B0"
             f"&yearIdLabel={year}&yearId={year}"
             f"&competitionId={comp_id}&competitionSectionId=0&search=search"
         )
     
-        return ranking_urls
+    return ranking_urls
+
+
+# --------------------------------------------------------------------------
+# アプリケーション本体
+# --------------------------------------------------------------------------
+try:
+    st.title('📊 Jリーグデータビューア & 勝敗予測')
+
+    # --- サイドバーでのデータ取得・共通コンポーネントの処理 ---
+    
+    with st.sidebar:
+        st.header("共通設定")
+        years = list(range(2020, pd.Timestamp.now().year + 2))
+        current_year = st.selectbox("表示・予測する年度を選択してください:", years, index=years.index(pd.Timestamp.now().year), key='year_selector')
+        st.session_state.current_year = current_year
 
         # --- データの取得 (キャッシュを利用) ---
         ranking_urls = get_ranking_urls(st.session_state.current_year)
