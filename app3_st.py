@@ -97,8 +97,6 @@ TEAM_NAME_MAPPING = {
     '町田': 'FC町田ゼルビア',
     '仙台': 'ベガルタ仙台',
     # J2/J3の略称・表記揺れを重点的に追加
-    'いわき': 'いわきFC',
-    '藤枝': '藤枝MYFC',    
     '秋田': 'ブラウブリッツ秋田',
     '山形': 'モンテディオ山形',
     '水戸': '水戸ホーリーホック',
@@ -129,12 +127,7 @@ TEAM_NAME_MAPPING = {
     '琉球': 'FC琉球',
     '宮崎': 'テゲバジャーロ宮崎',
     '鹿児島': '鹿児島ユナイテッドFC',
-    '長野': 'AC長野パルセイロ',
-    '八戸': 'ヴァンラーレ八戸',
-    '奈良': '奈良クラブ',
-    '高知': '高知ユナイテッドSC',
-    '大宮アルディージャ': 'RB大宮アルディージャ',
-    
+
     # ユーザー報告の揺れに対応
     'ザスパクサツ群馬': 'ザスパ群馬',
     'FC岐阜': 'FC岐阜',
@@ -443,12 +436,52 @@ try:
         current_year = st.selectbox("表示・予測する年度を選択してください:", years, index=years.index(pd.Timestamp.now().year), key='year_selector')
         st.session_state.current_year = current_year
 
+# --- competitionIdマッピング (年度・リーグごと) ---
+# このテーブルを使用して、各年度のランキングURLを正確に取得
+COMPETITION_ID_MAPPING = {
+    2025: {'J1': 651, 'J2': 655, 'J3': 657},
+    2024: {'J1': 589, 'J2': 590, 'J3': 591},
+    2023: {'J1': 554, 'J2': 555, 'J3': 556},
+    2022: {'J1': 521, 'J2': 522, 'J3': 523},
+}
+
+def get_ranking_urls(year):
+    """
+    指定された年度のランキングURL辞書を生成する
+    
+    Args:
+        year (int): 対象年度 (2022-2025)
+    
+    Returns:
+        dict: リーグ名をキー、URLを値とした辞書
+    """
+    if year not in COMPETITION_ID_MAPPING:
+        logging.warning(f"年度 {year} のcompetitionIdマッピングがありません")
+        return {}
+    
+    competition_ids = COMPETITION_ID_MAPPING[year]
+    
+    ranking_urls = {}
+    for league, comp_id in competition_ids.items():
+        ranking_urls[league] = (
+            f"https://data.j-league.or.jp/SFRT01/"
+            f"?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80"
+            f"&competitionIdLabel=%E6%98%8E%E6%B2%BB%E5%AE%89%E7%94%B0"
+            f"%EF%BC%AA%EF%BC%9{ord(league[1]) - ord('0')}"  # J1->1, J2->2, J3->3
+            f"%E3%83%AA%E3%83%BC%E3%82%B0"
+            f"&yearIdLabel={year}&yearId={year}"
+            f"&competitionId={comp_id}&competitionSectionId=0&search=search"
+        )
+    
+        return ranking_urls
+
         # --- データの取得 (キャッシュを利用) ---
-        ranking_urls = {
-            'J1': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%91%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=651&competitionSectionId=0&search=search',
-            'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=655&competitionSectionId=0&search=search',
-            'J3': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%93%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=657&competitionSectionId=0&search=search'
-        }
+        ranking_urls = get_ranking_urls(st.session_state.current_year)
+#        ranking_urls = {
+#            'J1': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%91%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=651&competitionSectionId=0&search=search',
+#            'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=655&competitionSectionId=0&search=search',
+#            'J3': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%93%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=657&competitionSectionId=0&search=search'
+#        }
         schedule_url = f'https://data.j-league.or.jp/SFMS01/search?competition_years={st.session_state.current_year}&competition_frame_ids=1&competition_frame_ids=2&competition_frame_ids=3&tv_relay_station_name='
 
         # 順位表データの取得と正規化
