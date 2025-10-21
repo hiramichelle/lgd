@@ -127,12 +127,7 @@ TEAM_NAME_MAPPING = {
     '琉球': 'FC琉球',
     '宮崎': 'テゲバジャーロ宮崎',
     '鹿児島': '鹿児島ユナイテッドFC',
-    '長野': 'AC長野パルセイロ',
-    '奈良': '奈良クラブ',
-    '八戸': 'ヴァンラーレ八戸',
-    'いわき': 'いわきFC',
-    '藤枝': '藤枝MYFC',
-    
+
     # ユーザー報告の揺れに対応
     'ザスパクサツ群馬': 'ザスパ群馬',
     'FC岐阜': 'FC岐阜',
@@ -183,6 +178,7 @@ def scrape_ranking_data(url):
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         
+        # DataFrameを読み込む際に、'順位'を含むテーブルを検索
         dfs = pd.read_html(StringIO(response.text), flavor='lxml', header=0, match='順位')
         
         if not dfs:
@@ -285,7 +281,7 @@ def create_point_aggregate_df(schedule_df, current_year):
 
     df = schedule_df.copy()
     
-    # 【✅ 修正2: スコアパースの堅牢化】
+    # 【✅ スコアパースの堅牢化】
     # 1. 全角ハイフンなどを半角ハイフンに統一し、前後スペースを除去
     df.loc[:, 'スコア_cleaned'] = df['スコア'].astype(str).str.replace('ー', '-').str.strip()
     
@@ -373,255 +369,92 @@ def calculate_recent_form(pointaggregate_df, team, league):
     # 勝点がintであることを前提に合計
     return recent_5_games['勝点'].sum()
 
-def get_ranking_data_for_prediction(combined_ranking_df, league):
-    """指定されたリーグの順位データを {チーム名: 順位} の辞書形式で返す"""
-    if combined_ranking_df.empty: 
-        return {}
-    league_df = combined_ranking_df[combined_ranking_df['大会'] == league].copy()
-    if '順位' in league_df.columns and 'チーム' in league_df.columns:
-        league_df.loc[:, '順位'] = pd.to_numeric(league_df['順位'], errors='coerce')
-        return league_df.dropna(subset=['順位']).set_index('チーム')['順位'].to_dict()
-    return {}
-
-def get_goal_difference(combined_ranking_df, team, league):
-    """指定チームの得失点差を取得"""
-    if combined_ranking_df.empty:
-        return 0
-    league_df = combined_ranking_df[combined_ranking_df['大会'] == league]
-    team_data = league_df[league_df['チーム'] == team]
-    if team_data.empty:
-        return 0
-    if '得失点差' in team_data.columns:
-        return pd.to_numeric(team_data['得失点差'].iloc[0], errors='coerce') or 0
-    return 0
-
-def calculate_recent_form_weighted(pointaggregate_df, team, league):
-    """
-    直近5試合の加重されたフォームスコアを計算
-    - 最新試合により高い重みを付与
-    - 勝敗パターンも考慮
-    """
-    if pointaggregate_df.empty: 
-        return 0, []
-    
-    team_results = pointaggregate_df[
-        (pointaggregate_df['大会'] == league) &
-        (pointaggregate_df['チーム'] == team)
-    ]
-    
-    if team_results.empty:
-        return 0, []
-    
-    # 最新の5試合を時系列順に取得
-    recent_5_games = team_results.sort_values(by='試合日', ascending=False).head(5).sort_values(by='試合日', ascending=True)
-    
-    if recent_5_games.empty:
-        return 0, []
-    
-    # 時系列重み付け: 最新試合ほど高い重み (1.0 -> 1.4)
-    weights = [1.0 + (i * 0.1) for i in range(len(recent_5_games))]
-    weighted_points = recent_5_games['勝点'].values * weights
-    
-    weighted_score = weighted_points.sum()
-    form_details = [
-        {
-            'date': row['試合日'].strftime('%m/%d'),
-            'result': row['勝敗'],
-            'score': row['勝点'],
-            'weight': w,
-            'weighted_score': row['勝点'] * w
-        }
-        for w, (_, row) in zip(weights, recent_5_games.iterrows())
-    ]
-    
-    return weighted_score, form_details
-
-def calculate_days_rest(pointaggregate_df, team, league, prediction_date=None):
-    """
-    前試合からの休息日数を計算
-    """
-    if pointaggregate_df.empty:
-        return 0, None
-    
-    if prediction_date is None:
-        prediction_date = pd.Timestamp.now()
-    else:
-        prediction_date = pd.to_datetime(prediction_date)
-    
-    team_results = pointaggregate_df[
-        (pointaggregate_df['大会'] == league) &
-        (pointaggregate_df['チーム'] == team)
-    ]
-    
-    if team_results.empty:
-        return 0, None
-    
-    # 予測日より前で、最も直近の試合を取得
-    past_matches = team_results[team_results['試合日'] < prediction_date]
-    
-    if past_matches.empty:
-        return 0, None
-    
-    last_match_date = past_matches['試合日'].max()
-    days_rest = (prediction_date - last_match_date).days
-    
-    return days_rest, last_match_date
-
-def calculate_rest_fatigue_factor(days_rest):
-    """
-    休息日数に基づく疲労係数を計算
-    """
-    if days_rest is None or days_rest <= 0:
-        return 0, "試合データなし"
-    elif days_rest <= 3:
-        return -1.0, f"{days_rest}日: 疲労あり"
-    elif days_rest <= 5:
-        return -0.3, f"{days_rest}日: 中程度の疲労"
-    elif days_rest <= 7:
-        return 0.5, f"{days_rest}日: 充分な休息"
-    else:
-        return -0.2, f"{days_rest}日: 過度な休息"
-
-def predict_match_outcome_v2(home_team, away_team, selected_league, current_year, 
-                              combined_ranking_df, pointaggregate_df, 
-                              prediction_date=None, debug=False):
-    """
-    改善版: 得失点差・試合間隔・時系列重み付けを含む勝敗予測
-    """
-    
+def predict_match_outcome(home_team, away_team, selected_league, current_year, combined_ranking_df, pointaggregate_df):
+    """ルールベースで勝敗を予測する (順位差、調子、ホームアドバンテージ、**守備力**を使用)"""
     # データの存在チェック
     if combined_ranking_df.empty or pointaggregate_df.empty:
         if combined_ranking_df.empty:
-            return "データ不足", "順位表データが取得できています。", "#ccc", None
+            return "データ不足", "順位表データが取得できていません。", "#ccc"
         elif pointaggregate_df.empty:
-            return "データ不足", "日程表の試合結果（日付とスコア）集計ができていません。", "#ccc", None
+            return "データ不足", "日程表の試合結果（日付とスコア）集計ができていません。データが未更新か、日付パースエラーが続いています。", "#ccc"
+
 
     # 順位データ取得
-    ranking = get_ranking_data_for_prediction(combined_ranking_df, selected_league)
+    # combined_ranking_dfは既にメインロジックで '失点' を含む数値列がintに変換済み
+    ranking_df_league = combined_ranking_df[combined_ranking_df['大会'] == selected_league]
+
+    # 順位情報がないチームがいる場合は予測不可
+    if home_team not in ranking_df_league['チーム'].values or away_team not in ranking_df_league['チーム'].values:
+        return "情報不足", "選択されたチームの順位情報がまだありません。", "#ccc"
     
-    if home_team not in ranking or away_team not in ranking:
-        return "情報不足", "選択されたチームの順位情報がまだありません。", "#ccc", None
-    
-    # --- パラメータ設定 (重み付け) ---
-    WEIGHT_RANK = 1.5          # 順位差の影響度
-    WEIGHT_GOAL_DIFF = 0.8     # 得失点差の影響度
-    WEIGHT_FORM = 1.0          # フォームの影響度
-    WEIGHT_REST = 0.6          # 休息日数の影響度
-    HOME_ADVANTAGE = 1.5       # ホームアドバンテージ
+    # --- パラメータ設定 (影響度) ---
+    WEIGHT_RANK = 1.5
+    WEIGHT_FORM = 1.0
+    WEIGHT_DEFFENSE = 0.5  # <--- 新しい守備力指標の重み
+    HOME_ADVANTAGE = 1.5
     DRAW_THRESHOLD = 3
 
     # --- 1. 順位スコア ---
+    ranking = get_ranking_data_for_prediction(combined_ranking_df, selected_league)
     rank_score_H = (ranking[away_team] - ranking[home_team]) * WEIGHT_RANK
     
-    # --- 2. 得失点差スコア ---
-    goal_diff_H = get_goal_difference(combined_ranking_df, home_team, selected_league)
-    goal_diff_A = get_goal_difference(combined_ranking_df, away_team, selected_league)
-    goal_diff_score_H = (goal_diff_H - goal_diff_A) * WEIGHT_GOAL_DIFF
+    # --- 2. 直近の調子スコア ---
+    form_H = calculate_recent_form(pointaggregate_df, home_team, selected_league)
+    form_A = calculate_recent_form(pointaggregate_df, away_team, selected_league)
+    form_score_H = (form_H - form_A) * WEIGHT_FORM
     
-    # --- 3. 時系列重み付けによるフォームスコア ---
-    form_score_H_val, form_H_details = calculate_recent_form_weighted(pointaggregate_df, home_team, selected_league)
-    form_score_A_val, form_A_details = calculate_recent_form_weighted(pointaggregate_df, away_team, selected_league)
-    form_score_H = (form_score_H_val - form_score_A_val) * WEIGHT_FORM
+    # --- 3. 守備スコア (引き分け要因) ---
+    # チームの年間総失点を取得
+    home_goals_against = ranking_df_league[ranking_df_league['チーム'] == home_team]['失点'].iloc[0]
+    away_goals_against = ranking_df_league[ranking_df_league['チーム'] == away_team]['失点'].iloc[0]
     
-    # --- 4. 試合間隔・疲労係数 ---
-    days_rest_H, last_match_H = calculate_days_rest(pointaggregate_df, home_team, selected_league, prediction_date)
-    days_rest_A, last_match_A = calculate_days_rest(pointaggregate_df, away_team, selected_league, prediction_date)
+    # 失点数の差を計算し、守備スコアとする
+    # Hチームの失点がAチームより少ない（守備が良い）ほど、H勝利スコアが上がるように設定
+    # ただし、守備は引き分け要因でもあるため、全体の勝敗スコアへの影響はRANK/FORMより抑える (WEIGHT_DEFFENSE=0.5)
+    defense_score_H = (away_goals_against - home_goals_against) * WEIGHT_DEFFENSE
     
-    rest_factor_H, rest_reason_H = calculate_rest_fatigue_factor(days_rest_H)
-    rest_factor_A, rest_reason_A = calculate_rest_fatigue_factor(days_rest_A)
-    
-    rest_score_H = (rest_factor_H - rest_factor_A) * WEIGHT_REST
-    
-    # --- 5. ホームアドバンテージ ---
+    # --- 4. ホームアドバンテージ ---
     home_advantage_score = HOME_ADVANTAGE
     
-    # --- 最終スコア計算 ---
-    home_win_score = (
-        rank_score_H + 
-        goal_diff_score_H + 
-        form_score_H + 
-        rest_score_H + 
-        home_advantage_score
-    )
+    # --- 総合スコア ---
+    home_win_score = rank_score_H + form_score_H + defense_score_H + home_advantage_score
     
-    # --- 予測結果判定 ---
+    # --- 予測結果の判定 ---
+    # 守備力（失点の少なさ）が高いチーム同士の対決では、defense_score_Hが0に近づき、
+    # 総合スコアが中央値（0）に集まりやすくなる。
+    
+    # DEBUG情報
+    st.session_state.last_prediction_debug = {
+        'rank_score_H': rank_score_H,
+        'form_score_H': form_score_H,
+        'defense_score_H': defense_score_H,
+        'home_advantage_score': home_advantage_score,
+        'home_win_score': home_win_score
+    }
+    
     if home_win_score > DRAW_THRESHOLD:
-        result = f"🔴 {home_team} の勝利"
+        result = f"🔥 {home_team} の勝利"
+        detail = (
+            f"予測優位スコア: {home_win_score:.1f}点 ("
+            f"順位:{rank_score_H:.1f}点 + 調子:{form_score_H:.1f}点 + "
+            f"守備:{defense_score_H:.1f}点 + Hアドバンテージ:{home_advantage_score:.1f}点)"
+        )
         color = "#ff4b4b"
     elif home_win_score < -DRAW_THRESHOLD:
         result = f"✈️ {away_team} の勝利"
+        # スコアはH目線なので、A勝利の際はマイナスで表示
+        detail = (
+            f"予測優位スコア: {home_win_score:.1f}点 ("
+            f"順位:{rank_score_H:.1f}点 + 調子:{form_score_H:.1f}点 + "
+            f"守備:{defense_score_H:.1f}点 + Hアドバンテージ:{home_advantage_score:.1f}点)"
+        )
         color = "#4b87ff"
     else:
         result = "🤝 引き分け"
+        detail = f"予測優位スコア: {home_win_score:.1f}点 (極めて拮抗しています)"
         color = "#ffd700"
-    
-    # --- 詳細メッセージ ---
-    detail = (
-        f"予測優位スコア: {home_win_score:.2f}点\n"
-        f"  • 順位差: {rank_score_H:.2f}点 (H:{ranking[home_team]}位 vs A:{ranking[away_team]}位)\n"
-        f"  • 得失点差: {goal_diff_score_H:.2f}点 (H:{goal_diff_H:+d} vs A:{goal_diff_A:+d})\n"
-        f"  • フォーム: {form_score_H:.2f}点 (H:{form_score_H_val:.1f} vs A:{form_score_A_val:.1f})\n"
-        f"  • 休息/疲労: {rest_score_H:.2f}点 (H:{rest_reason_H} vs A:{rest_reason_A})\n"
-        f"  • ホームアドバンテージ: {home_advantage_score:.2f}点"
-    )
-    
-    # デバッグ情報
-    debug_info = {
-        'rank_score': rank_score_H,
-        'goal_diff_score': goal_diff_score_H,
-        'form_score': form_score_H,
-        'rest_score': rest_score_H,
-        'home_advantage': home_advantage_score,
-        'total_score': home_win_score,
-        'form_details_H': form_H_details,
-        'form_details_A': form_A_details,
-        'rest_details': {
-            'home': {'days': days_rest_H, 'last_match': last_match_H, 'factor': rest_factor_H},
-            'away': {'days': days_rest_A, 'last_match': last_match_A, 'factor': rest_factor_A}
-        }
-    } if debug else None
-    
-    return result, detail, color, debug_info
-
-
-COMPETITION_ID_MAPPING = {
-    2025: {'J1': 651, 'J2': 655, 'J3': 657},
-    2024: {'J1': 589, 'J2': 590, 'J3': 591},
-    2023: {'J1': 554, 'J2': 555, 'J3': 556},
-    2022: {'J1': 521, 'J2': 522, 'J3': 523},
-}
-
-def get_ranking_urls(year):
-    """
-    指定された年度のランキングURL辞書を生成する
-    
-    Args:
-        year (int): 対象年度 (2022-2025)
-    
-    Returns:
-        dict: リーグ名をキー、URLを値とした辞書
-    """
-    if year not in COMPETITION_ID_MAPPING:
-        logging.warning(f"年度 {year} のcompetitionIdマッピングがありません")
-        return {}
-    
-    competition_ids = COMPETITION_ID_MAPPING[year]
-    
-    ranking_urls = {}
-    for league, comp_id in competition_ids.items():
-        league_num = league[1]  # 'J1' -> '1', 'J2' -> '2', 'J3' -> '3'
-        ranking_urls[league] = (
-            f"https://data.j-league.or.jp/SFRT01/"
-            f"?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80"
-            f"&competitionIdLabel=%E6%98%8E%E6%B2%BB%E5%AE%89%E7%94%B0"
-            f"%EF%BC%AA%EF%BC%9{league_num}"
-            f"%E3%83%AA%E3%83%BC%E3%82%B0"
-            f"&yearIdLabel={year}&yearId={year}"
-            f"&competitionId={comp_id}&competitionSectionId=0&search=search"
-        )
-    
-    return ranking_urls
-
+        
+    return result, detail, color
 
 # --------------------------------------------------------------------------
 # アプリケーション本体
@@ -638,12 +471,13 @@ try:
         st.session_state.current_year = current_year
 
         # --- データの取得 (キャッシュを利用) ---
-        ranking_urls = get_ranking_urls(st.session_state.current_year)
-#        ranking_urls = {
-#            'J1': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%91%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=651&competitionSectionId=0&search=search',
-#            'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=655&competitionSectionId=0&search=search',
-#            'J3': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%93%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=657&competitionSectionId=0&search=search'
-#        }
+        # NOTE: 以前のURIの問題を解決するため、競争IDマッピングを使用することが望ましいですが、
+        # ここではユーザー提供の最新コードに合わせて、現在のURL形式を維持します。
+        ranking_urls = {
+            'J1': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%91%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=651&competitionSectionId=0&search=search',
+            'J2': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%92%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=655&competitionSectionId=0&search=search',
+            'J3': f'https://data.j-league.or.jp/SFRT01/?competitionSectionIdLabel=%E6%9C%80%E6%96%B0%E7%AF%80&competitionIdLabel=%E6%98%8E%E6%B2%BB%E7%94%B0%EF%BC%AA%EF%BC%93%E3%83%AA%E3%83%BC%E3%82%B0&yearIdLabel={st.session_state.current_year}&yearId={st.session_state.current_year}&competitionId=657&competitionSectionId=0&search=search'
+        }
         schedule_url = f'https://data.j-league.or.jp/SFMS01/search?competition_years={st.session_state.current_year}&competition_frame_ids=1&competition_frame_ids=2&competition_frame_ids=3&tv_relay_station_name='
 
         # 順位表データの取得と正規化
@@ -655,11 +489,19 @@ try:
         valid_ranking_dfs = [df for df in ranking_dfs_raw.values() if df is not None and not df.empty]
         if valid_ranking_dfs:
             try:
+                # '大会'カラムを追加し、個別のDFを結合
+                ranking_dfs_with_league = []
                 for league, df_val in ranking_dfs_raw.items():
-                    if df_val is not None:
+                    if df_val is not None and not df_val.empty:
                         df_val.loc[:, '大会'] = league
-                combined_ranking_df = pd.concat(valid_ranking_dfs, ignore_index=True)
-                ranking_data_available = True
+                        ranking_dfs_with_league.append(df_val)
+                
+                if ranking_dfs_with_league:
+                    combined_ranking_df = pd.concat(ranking_dfs_with_league, ignore_index=True)
+                    ranking_data_available = True
+                else:
+                    ranking_data_available = False
+
             except ValueError as e:
                 logging.error(f"順位表データ結合エラー: {e}", exc_info=True)
                 st.error("順位表データを結合できませんでした。")
@@ -672,6 +514,7 @@ try:
             
             for col in ranking_numeric_cols:
                 if col in combined_ranking_df.columns:
+                    # '失点'が数値に変換されていることが、予測ロジックに必須
                     combined_ranking_df[col] = pd.to_numeric(
                         combined_ranking_df[col], errors='coerce'
                     ).fillna(0).astype(int)
@@ -719,12 +562,14 @@ try:
 
         if not st.session_state.league_options:
             st.warning("大会情報が見つかりません。")
-            st.stop()
-            
+            # st.stop() # データを取得できていない場合、予測ロジックへの影響を考慮して停止しない
+
         # サイドバーのデータビューア用選択肢
         with st.sidebar:
             st.header("データビューア設定")
-            selected_league_sidebar_viewer = st.selectbox('表示したい大会を選択してください (ビューア用):', st.session_state.league_options, key='viewer_league_selectbox')
+            # st.session_state.league_optionsが空の場合はダミーリストを渡す
+            league_options_viewer = st.session_state.league_options if st.session_state.league_options else ['データなし']
+            selected_league_sidebar_viewer = st.selectbox('表示したい大会を選択してください (ビューア用):', league_options_viewer, key='viewer_league_selectbox')
 
             # チーム選択プルダウン 
             team_options = []
@@ -926,14 +771,11 @@ try:
     # ----------------------------------------------------------------------
     with tab2:
         st.header("🔮 勝敗予測ツール")
-        st.caption("※この予測は順位と直近5試合の成績に基づくシンプルなルールベースモデルであり、試合結果を保証するものではありません。")
-
-        if not st.session_state.league_options:
-            st.warning("予測に必要なデータ（大会情報）が取得できていません。年度を確認してください。")
-            st.stop()
+        st.caption("※この予測は順位、直近の成績、および守備力に基づくルールベースモデルであり、試合結果を保証するものではありません。")
 
         # 予測対象の大会選択
-        selected_league_predictor = st.selectbox('予測対象の大会を選択してください:', st.session_state.league_options, key='predictor_league_selectbox')
+        league_options_predictor = st.session_state.league_options if st.session_state.league_options else ['データなし']
+        selected_league_predictor = st.selectbox('予測対象の大会を選択してください:', league_options_predictor, key='predictor_league_selectbox')
 
         # 予測対象のチームリストを生成 
         predictor_team_options = []
@@ -965,19 +807,14 @@ try:
             elif st.button('試合結果を予測する', key='predict_button', use_container_width=True):
                 st.subheader(f"📅 {home_team} vs {away_team} の予測結果")
                 
-                # デバッグモードの設定（本番はFalseに）
-                debug_mode = st.checkbox("詳細デバッグ情報を表示", value=False, key='debug_checkbox')
-                
-                # 改善版予測の実行
-                result, detail, color, debug_info = predict_match_outcome_v2(
+                # 予測実行 (引数を全て渡すように補完)
+                result, detail, color = predict_match_outcome(
                     home_team,
                     away_team,
                     selected_league_predictor,
                     st.session_state.current_year,
                     st.session_state.combined_ranking_df,
-                    st.session_state.pointaggregate_df,
-                    prediction_date=None,
-                    debug=debug_mode
+                    st.session_state.pointaggregate_df
                 )
                 
                 # 予測結果の表示
@@ -986,61 +823,24 @@ try:
                     <div style='background-color: {color}; padding: 20px; border-radius: 10px; color: black; text-align: center;'>
                         <h3 style='margin: 0; color: white;'>{result}</h3>
                     </div>
+                    <p style='margin-top: 10px; text-align: center;'>{detail}</p>
                     """,
                     unsafe_allow_html=True
                 )
                 
-                # 詳細情報の表示
-                st.info(detail)
-                
-                # デバッグ情報の表示
-                if debug_mode and debug_info:
-                    st.divider()
-                    st.subheader("🔧 デバッグ情報")
-                    
-                    # スコアの内訳を表示
-                    col1, col2, col3, col4, col5 = st.columns(5)
-                    with col1:
-                        st.metric("順位差", f"{debug_info['rank_score']:.2f}")
-                    with col2:
-                        st.metric("得失点差", f"{debug_info['goal_diff_score']:.2f}")
-                    with col3:
-                        st.metric("フォーム", f"{debug_info['form_score']:.2f}")
-                    with col4:
-                        st.metric("休息/疲労", f"{debug_info['rest_score']:.2f}")
-                    with col5:
-                        st.metric("最終スコア", f"{debug_info['total_score']:.2f}", 
-                                 delta=("ホーム有利" if debug_info['total_score'] > 0 else "アウェー有利"))
-                    
-                    # フォーム詳細
-                    if debug_info['form_details_H']:
-                        st.write("**ホームチームの直近5試合（加重スコア）**")
-                        form_df_h = pd.DataFrame(debug_info['form_details_H'])
-                        st.dataframe(form_df_h[['date', 'result', 'score', 'weight', 'weighted_score']])
-                    
-                    if debug_info['form_details_A']:
-                        st.write("**アウェーチームの直近5試合（加重スコア）**")
-                        form_df_a = pd.DataFrame(debug_info['form_details_A'])
-                        st.dataframe(form_df_a[['date', 'result', 'score', 'weight', 'weighted_score']])
-                    
-                    # 休息情報
-                    st.write("**休息日数と疲労係数**")
-                    rest_details = debug_info['rest_details']
-                    col_h, col_a = st.columns(2)
-                    
-                    with col_h:
-                        st.write(f"**{home_team}**")
-                        st.write(f"  休息日数: {rest_details['home']['days']}日")
-                        if rest_details['home']['last_match']:
-                            st.write(f"  前試合: {rest_details['home']['last_match'].strftime('%Y/%m/%d')}")
-                        st.write(f"  疲労係数: {rest_details['home']['factor']:.2f}")
-                    
-                    with col_a:
-                        st.write(f"**{away_team}**")
-                        st.write(f"  休息日数: {rest_details['away']['days']}日")
-                        if rest_details['away']['last_match']:
-                            st.write(f"  前試合: {rest_details['away']['last_match'].strftime('%Y/%m/%d')}")
-                        st.write(f"  疲労係数: {rest_details['away']['factor']:.2f}")
+                # DEBUG情報 (追加したロジックの動作確認用)
+                if 'last_prediction_debug' in st.session_state:
+                    debug_data = st.session_state.last_prediction_debug
+                    st.markdown("#### 📝 予測スコアの内訳 (デバッグ情報)")
+                    st.json({
+                        "総合スコア (H勝利優位)": f"{debug_data['home_win_score']:.2f}点",
+                        "順位差スコア": f"{debug_data['rank_score_H']:.2f}点",
+                        "調子差スコア": f"{debug_data['form_score_H']:.2f}点",
+                        "守備力差スコア (NEW)": f"{debug_data['defense_score_H']:.2f}点",
+                        "ホームアドバンテージ": f"{debug_data['home_advantage_score']:.2f}点",
+                        "DRAW閾値": f"{DRAW_THRESHOLD}"
+                    })
+
 
 except Exception as app_e:
     logging.error(f"メインアプリケーションエラー: {app_e}", exc_info=True)
