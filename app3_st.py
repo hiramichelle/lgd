@@ -10,7 +10,7 @@ import unicodedata
 from io import StringIO
 import numpy as np
 
-# --- 日本語フォント設定の強化 (変更なし) ---
+# --- 日本語フォント設定の強化 ---
 try:
     font_candidates = ['IPAexGothic', 'Noto Sans CJK JP', 'Hiragino Maru Gothic Pro', 'MS Gothic', 'BIZ UDGothic', 'Yu Gothic']
     
@@ -37,7 +37,7 @@ except Exception as e:
     plt.rcParams['axes.unicode_minus'] = False
     plt.rcParams['font.family'] = 'sans-serif'
 
-# --- ログ設定 (変更なし) ---
+# --- ログ設定 ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -46,7 +46,7 @@ logging.basicConfig(
 logging.info("--- アプリケーション開始 ---")
 
 # --------------------------------------------------------------------------
-# 大会名マスタの定義 (変更なし)
+# 大会名マスタの定義
 # --------------------------------------------------------------------------
 LEAGUE_NAME_MAPPING = {
     '明治安田J1リーグ': 'J1',
@@ -66,10 +66,9 @@ LEAGUE_NAME_MAPPING = {
 }
 
 # --------------------------------------------------------------------------
-# チーム名マスタの定義と初期化 (変更なし)
+# チーム名マスタの定義と初期化
 # --------------------------------------------------------------------------
 TEAM_NAME_MAPPING = {
-    # J1主要チーム (略称)
     '浦和': '浦和レッズ',
     '鹿島': '鹿島アントラーズ',
     '横浜FM': '横浜F・マリノス',
@@ -95,7 +94,6 @@ TEAM_NAME_MAPPING = {
     '大宮': '大宮アルディージャ',
     '町田': 'FC町田ゼルビア',
     '仙台': 'ベガルタ仙台',
-    # J2/J3の略称・表記揺れを重点的に追加
     '秋田': 'ブラウブリッツ秋田',
     '山形': 'モンテディオ山形',
     '水戸': '水戸ホーリーホック',
@@ -126,25 +124,26 @@ TEAM_NAME_MAPPING = {
     '琉球': 'FC琉球',
     '宮崎': 'テゲバジャーロ宮崎',
     '鹿児島': '鹿児島ユナイテッドFC',
-
-    # ユーザー報告の揺れに対応
+    '八戸': 'ヴァンラーレ八戸',
+    '奈良': '奈良クラブ',
+    '長野': 'AC長野パルセイロ',
+    '高知': '高知ユナイテッドSC',
+    'いわ': 'いわFC',
+    '藤枝': '藤枝MYFC',
     'ザスパクサツ群馬': 'ザスパ群馬',
     'FCギフ': 'FC岐阜',
     'カマタマーレサヌキ': 'カマタマーレ讃岐',
     'Y.S.C.C.横浜': 'Y.S.C.C.横浜',
-    
-    # 追加した栃木SCの揺れ
     '栃木C': '栃木シティ',
     '栃木SC': '栃木SC',
 }
 
-# 最終的な正式名称をマッピングに追加(正規名称がキーで、値も正規名称)
 for canonical_name in list(TEAM_NAME_MAPPING.values()):
     if canonical_name not in TEAM_NAME_MAPPING:
         TEAM_NAME_MAPPING[canonical_name] = canonical_name
 
 # --------------------------------------------------------------------------
-# ヘルパー関数: リーグ名・チーム名を正規化する (変更なし)
+# ヘルパー関数: リーグ名・チーム名を正規化する
 # --------------------------------------------------------------------------
 def normalize_j_name(name):
     """Jリーグ名やチーム名を半角に統一し、略称を正式名称にマッピングする (NFKC強化)"""
@@ -160,7 +159,7 @@ def normalize_j_name(name):
     return name
 
 # --------------------------------------------------------------------------
-# Webスクレイピング関数 (変更なし)
+# Webスクレイピング関数
 # --------------------------------------------------------------------------
 @st.cache_data(ttl=3600)
 def scrape_ranking_data(url):
@@ -341,8 +340,10 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     ① manual_adjustment: 手動調整ウェイト (-10.0 ~ +10.0)
        正の値でホーム勝利へシフト、負の値でアウェイ勝利へシフト
     
-    ② DRAW_THRESHOLD: 0.05に縮小
-       総合スコアが -0.05 ~ +0.05 の範囲のみを引き分けと判定
+    ② DRAW_THRESHOLD: 0.75に縮小
+       総合スコアが -0.75 ~ +0.75 の範囲のみを引き分けと判定
+    
+    ③ 攻守バランス: 得点力と守備力の両面を評価
     """
     
     # データの存在チェック
@@ -357,12 +358,13 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     if home_team not in ranking_df_league['チーム'].values or away_team not in ranking_df_league['チーム'].values:
         return "情報不足", "選択されたチームの順位情報がまだありません。", "#ccc"
     
-    # --- パラメータ設定 ---
-    WEIGHT_RANK = 1.5
-    WEIGHT_FORM = 1.0
-    WEIGHT_DEFFENSE = 0.5
-    HOME_ADVANTAGE = 1.5
-    DRAW_THRESHOLD = 0.05  # ★ 引き分け判定の閾値を大幅縮小
+    # --- パラメータ設定 (攻守バランス重視) ---
+    WEIGHT_RANK = 1.2
+    WEIGHT_FORM = 1.15
+    WEIGHT_OFFENSE = 1.00  # 得点力の重み (NEW)
+    WEIGHT_DEFENSE = 1.00  # 守備力の重み
+    HOME_ADVANTAGE = 1.05
+    DRAW_THRESHOLD = 0.75
 
     # --- 1. 順位スコア ---
     ranking = get_ranking_data_for_prediction(combined_ranking_df, selected_league)
@@ -373,24 +375,34 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     form_A = calculate_recent_form(pointaggregate_df, away_team, selected_league)
     form_score_H = (form_H - form_A) * WEIGHT_FORM
     
-    # --- 3. 守備スコア ---
+    # --- 3. 得点力スコア (NEW: 攻撃力指標) ---
+    # チームの年間総得点を取得し、得点力の差をスコア化
+    # Hチームの得点が多いほど、H勝利スコアが上がる
+    home_goals_scored = ranking_df_league[ranking_df_league['チーム'] == home_team]['得点'].iloc[0]
+    away_goals_scored = ranking_df_league[ranking_df_league['チーム'] == away_team]['得点'].iloc[0]
+    offense_score_H = (home_goals_scored - away_goals_scored) * WEIGHT_OFFENSE
+    
+    # --- 4. 守備力スコア (守備の堅さ指標) ---
+    # チームの年間総失点を取得し、守備力の差をスコア化
+    # Hチームの失点が少ない(守備が良い)ほど、H勝利スコアが上がる
     home_goals_against = ranking_df_league[ranking_df_league['チーム'] == home_team]['失点'].iloc[0]
     away_goals_against = ranking_df_league[ranking_df_league['チーム'] == away_team]['失点'].iloc[0]
-    defense_score_H = (away_goals_against - home_goals_against) * WEIGHT_DEFFENSE
+    defense_score_H = (away_goals_against - home_goals_against) * WEIGHT_DEFENSE
     
-    # --- 4. ホームアドバンテージ ---
+    # --- 5. ホームアドバンテージ ---
     home_advantage_score = HOME_ADVANTAGE
     
-    # --- 5. 手動調整 (NEW) ---
+    # --- 6. 手動調整 ---
     # manual_adjustmentは直接、home_win_scoreに加算される
     
-    # --- 総合スコア ---
-    home_win_score = rank_score_H + form_score_H + defense_score_H + home_advantage_score + manual_adjustment
+    # --- 総合スコア (攻守のバランスを考慮) ---
+    home_win_score = rank_score_H + form_score_H + offense_score_H + defense_score_H + home_advantage_score + manual_adjustment
     
     # DEBUGの情報
     st.session_state.last_prediction_debug = {
         'rank_score_H': rank_score_H,
         'form_score_H': form_score_H,
+        'offense_score_H': offense_score_H,
         'defense_score_H': defense_score_H,
         'home_advantage_score': home_advantage_score,
         'manual_adjustment': manual_adjustment,
@@ -431,8 +443,6 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
 try:
     st.title('📊 Jリーグデータビューア & 勝敗予測')
 
-    # --- サイドバーでのデータ取得・共通コンポーネントの処理 ---
-    
     with st.sidebar:
         st.header("共通設定")
         years = list(range(2020, pd.Timestamp.now().year + 2))
@@ -505,8 +515,6 @@ try:
         
         st.session_state.league_options = sorted(list(set(league_options)))
 
-    # --- メインコンテンツをタブで分割 ---
-    
     tab1, tab2 = st.tabs(["📊 データビューア", "🔮 勝敗予測ツール"])
 
     # ----------------------------------------------------------------------
@@ -555,7 +563,6 @@ try:
             default_index = data_type_options.index("順位表") if "順位表" in data_type_options else 0
             data_type = st.radio("表示するデータを選択してください:", data_type_options, index=default_index, key='viewer_data_type')
 
-        # --- メイン画面の表示ロジック (ビューア) ---
         if data_type == "順位表":
             st.subheader(f"{selected_league_sidebar_viewer} {st.session_state.current_year} 順位表")
             if st.session_state.ranking_data_available and not st.session_state.combined_ranking_df.empty:
@@ -729,8 +736,7 @@ try:
             
             st.divider()
             
-            # ★ 手動調整機能の追加
-            st.subheader("⚙️ 手動調整機能（定性的要因の反映）")
+            st.subheader("⚙️ 手動調整機能(定性的要因の反映)")
             st.caption("キーマンの欠場、監督交代、直前の重要試合の疲労など、統計に現れない要因を手動で反映できます。")
             
             manual_adjustment = st.slider(
@@ -739,7 +745,7 @@ try:
                 max_value=10.0,
                 value=0.0,
                 step=0.5,
-                help="正の値: ホームに有利な要因（例: アウェイ主力欠場）\n負の値: アウェイに有利な要因（例: ホーム主力欠場）"
+                help="正の値: ホームに有利な要因(例: アウェイ主力欠場)\n負の値: アウェイに有利な要因(例: ホーム主力欠場)"
             )
             
             if manual_adjustment != 0:
