@@ -346,8 +346,8 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     ① manual_adjustment: 手動調整ウェイト (-10.0 ~ +10.0)
        正の値でホーム勝利へシフト、負の値でアウェイ勝利へシフト
     
-    ② DRAW_THRESHOLD: 0.05に縮小
-       総合スコアが -0.05 ~ +0.05 の範囲のみを引き分けと判定
+    ② DRAW_THRESHOLD: 0.75に縮小
+       総合スコアが -0.75 ~ +0.75 の範囲のみを引き分けと判定
     """
     
     # データの存在チェック
@@ -367,7 +367,7 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     WEIGHT_FORM = 1.15
     WEIGHT_DEFFENSE = 1.00
     HOME_ADVANTAGE = 1.05
-    DRAW_THRESHOLD = 0.75  # ★ 引き分け判定の閾値を大幅縮小
+    DRAW_THRESHOLD = 0.75
 
     # --- 1. 順位スコア ---
     ranking = get_ranking_data_for_prediction(combined_ranking_df, selected_league)
@@ -386,7 +386,7 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     # --- 4. ホームアドバンテージ ---
     home_advantage_score = HOME_ADVANTAGE
     
-    # --- 5. 手動調整 (NEW) ---
+    # --- 5. 手動調整 ---
     # manual_adjustmentは直接、home_win_scoreに加算される
     
     # --- 総合スコア ---
