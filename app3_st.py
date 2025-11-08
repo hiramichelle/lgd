@@ -363,11 +363,11 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
         return "情報不足", "選択されたチームの順位情報がまだありません。", "#ccc"
     
     # --- パラメータ設定 ---
-    WEIGHT_RANK = 1.5
-    WEIGHT_FORM = 1.0
+    WEIGHT_RANK = 1.2
+    WEIGHT_FORM = 1.1
     WEIGHT_DEFFENSE = 0.5
-    HOME_ADVANTAGE = 1.5
-    DRAW_THRESHOLD = 0.05  # ★ 引き分け判定の閾値を大幅縮小
+    HOME_ADVANTAGE = 1.1
+    DRAW_THRESHOLD = 0.1  # ★ 引き分け判定の閾値を大幅縮小
 
     # --- 1. 順位スコア ---
     ranking = get_ranking_data_for_prediction(combined_ranking_df, selected_league)
