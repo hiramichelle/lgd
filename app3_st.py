@@ -126,12 +126,7 @@ TEAM_NAME_MAPPING = {
     '琉球': 'FC琉球',
     '宮崎': 'テゲバジャーロ宮崎',
     '鹿児島': '鹿児島ユナイテッドFC',
-    '八戸': 'ヴァンラーレ八戸',
-    '奈良': '奈良クラブ',
-    '長野': 'AC長野パルセイロ',
-    '高知': '高知ユナイテッドSC',
-    'いわき': 'いわきFC',
-    '藤枝': '藤枝MYFC',
+
     # ユーザー報告の揺れに対応
     'ザスパクサツ群馬': 'ザスパ群馬',
     'FCギフ': 'FC岐阜',
@@ -346,8 +341,8 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     ① manual_adjustment: 手動調整ウェイト (-10.0 ~ +10.0)
        正の値でホーム勝利へシフト、負の値でアウェイ勝利へシフト
     
-    ② DRAW_THRESHOLD: 0.75に縮小
-       総合スコアが -0.75 ~ +0.75 の範囲のみを引き分けと判定
+    ② DRAW_THRESHOLD: 0.05に縮小
+       総合スコアが -0.05 ~ +0.05 の範囲のみを引き分けと判定
     """
     
     # データの存在チェック
@@ -363,11 +358,11 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
         return "情報不足", "選択されたチームの順位情報がまだありません。", "#ccc"
     
     # --- パラメータ設定 ---
-    WEIGHT_RANK = 1.2
-    WEIGHT_FORM = 1.15
-    WEIGHT_DEFFENSE = 1.00
-    HOME_ADVANTAGE = 1.05
-    DRAW_THRESHOLD = 0.75
+    WEIGHT_RANK = 1.5
+    WEIGHT_FORM = 1.0
+    WEIGHT_DEFFENSE = 0.5
+    HOME_ADVANTAGE = 1.5
+    DRAW_THRESHOLD = 0.05  # ★ 引き分け判定の閾値を大幅縮小
 
     # --- 1. 順位スコア ---
     ranking = get_ranking_data_for_prediction(combined_ranking_df, selected_league)
@@ -386,7 +381,7 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     # --- 4. ホームアドバンテージ ---
     home_advantage_score = HOME_ADVANTAGE
     
-    # --- 5. 手動調整 ---
+    # --- 5. 手動調整 (NEW) ---
     # manual_adjustmentは直接、home_win_scoreに加算される
     
     # --- 総合スコア ---
@@ -408,7 +403,8 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
         detail = (
             f"予測優位スコア: {home_win_score:.2f}点 ("
             f"順位:{rank_score_H:.2f}点 + 調子:{form_score_H:.2f}点 + "
-            f"守備:{defense_score_H:.2f}点 + Hアドバンテージ:{home_advantage_score:.2f}点 + "
+            f"得点力:{offense_score_H:.2f}点 + 守備:{defense_score_H:.2f}点 + "
+            f"Hアドバンテージ:{home_advantage_score:.2f}点 + "
             f"手動調整:{manual_adjustment:.2f}点)"
         )
         color = "#ff4b4b"
@@ -417,7 +413,8 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
         detail = (
             f"予測優位スコア: {home_win_score:.2f}点 ("
             f"順位:{rank_score_H:.2f}点 + 調子:{form_score_H:.2f}点 + "
-            f"守備:{defense_score_H:.2f}点 + Hアドバンテージ:{home_advantage_score:.2f}点 + "
+            f"得点力:{offense_score_H:.2f}点 + 守備:{defense_score_H:.2f}点 + "
+            f"Hアドバンテージ:{home_advantage_score:.2f}点 + "
             f"手動調整:{manual_adjustment:.2f}点)"
         )
         color = "#4b87ff"
@@ -702,7 +699,8 @@ try:
     # ----------------------------------------------------------------------
     with tab2:
         st.header("🔮 勝敗予測ツール")
-        st.caption("※この予測は順位、直近の成績、および守備力に基づくルールベースモデルであり、試合結果を保証するものではありません。")
+        st.caption("※この予測は順位、直近の成績、得点力、守備力に基づくルールベースモデルであり、試合結果を保証するものではありません。")
+        st.info("🆕 **攻守バランスモデル**: 得点力(攻撃)と守備力(守備)の両面を考慮した予測を行います。")
 
         league_options_predictor = st.session_state.league_options if st.session_state.league_options else ['データなし']
         selected_league_predictor = st.selectbox('予測対象の大会を選択してください:', league_options_predictor, key='predictor_league_selectbox')
@@ -784,14 +782,33 @@ try:
                         "総合スコア (H勝利優位)": f"{debug_data['home_win_score']:.2f}点",
                         "順位差スコア": f"{debug_data['rank_score_H']:.2f}点",
                         "調子差スコア": f"{debug_data['form_score_H']:.2f}点",
+                        "得点力差スコア (NEW)": f"{debug_data['offense_score_H']:.2f}点",
                         "守備力差スコア": f"{debug_data['defense_score_H']:.2f}点",
                         "ホームアドバンテージ": f"{debug_data['home_advantage_score']:.2f}点",
                         "手動調整": f"{debug_data['manual_adjustment']:.2f}点",
-                        "DRAW閾値": "±0.05"
+                        "DRAW閾値": "±0.75"
                     })
+                    
+                    st.markdown("#### 📊 攻守バランスの可視化")
+                    st.caption("得点力と守備力の両面から、チームの総合的な強さを評価します。")
+                    
+                    col_offense, col_defense = st.columns(2)
+                    with col_offense:
+                        offense_indicator = "⚔️ 攻撃有利" if debug_data['offense_score_H'] > 0 else "🛡️ 守備有利" if debug_data['offense_score_H'] < 0 else "⚖️ 互角"
+                        st.metric(
+                            label="得点力の差",
+                            value=f"{debug_data['offense_score_H']:.2f}点",
+                            delta=offense_indicator
+                        )
+                    with col_defense:
+                        defense_indicator = "🛡️ 守備有利" if debug_data['defense_score_H'] > 0 else "⚔️ 攻撃有利" if debug_data['defense_score_H'] < 0 else "⚖️ 互角"
+                        st.metric(
+                            label="守備力の差",
+                            value=f"{debug_data['defense_score_H']:.2f}点",
+                            delta=defense_indicator
+                        )
 
 
 except Exception as app_e:
     logging.error(f"メインアプリケーションエラー: {app_e}", exc_info=True)
     st.error(f"アプリケーションの実行中にエラーが発生しました: {app_e}")
-            
