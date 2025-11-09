@@ -359,11 +359,11 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
         return "情報不足", "選択されたチームの順位情報がまだありません。", "#ccc"
     
     # --- パラメータ設定 (攻守バランス重視) ---
-    WEIGHT_RANK = 0.80
-    WEIGHT_FORM = 4.00
+    WEIGHT_RANK = 1.20
+    WEIGHT_FORM = 4.50
     WEIGHT_OFFENSE = 0.40  # 得点力の重み
     WEIGHT_DEFENSE = 0.40  # 守備力の重み
-    HOME_ADVANTAGE = 1.10
+    HOME_ADVANTAGE = 1.20
     DRAW_THRESHOLD = 1.50
 
     # --- 1. 順位スコア ---
