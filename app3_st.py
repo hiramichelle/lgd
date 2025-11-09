@@ -128,10 +128,10 @@ TEAM_NAME_MAPPING = {
     '奈良': '奈良クラブ',
     '長野': 'AC長野パルセイロ',
     '高知': '高知ユナイテッドSC',
-    'いわ': 'いわFC',
+    'いわき': 'いわきFC',
     '藤枝': '藤枝MYFC',
     'ザスパクサツ群馬': 'ザスパ群馬',
-    'FCギフ': 'FC岐阜',
+    '岐阜': 'FC岐阜',
     'カマタマーレサヌキ': 'カマタマーレ讃岐',
     'Y.S.C.C.横浜': 'Y.S.C.C.横浜',
     '栃木C': '栃木シティ',
@@ -361,8 +361,8 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     # --- パラメータ設定 (攻守バランス重視) ---
     WEIGHT_RANK = 1.2
     WEIGHT_FORM = 1.15
-    WEIGHT_OFFENSE = 1.00  # 得点力の重み (NEW)
-    WEIGHT_DEFENSE = 1.00  # 守備力の重み
+    WEIGHT_OFFENSE = 0.50  # 得点力の重み (NEW)
+    WEIGHT_DEFENSE = 0.50  # 守備力の重み
     HOME_ADVANTAGE = 1.05
     DRAW_THRESHOLD = 2.00
 
