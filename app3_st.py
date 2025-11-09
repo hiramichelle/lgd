@@ -363,7 +363,7 @@ def predict_match_outcome(home_team, away_team, selected_league, current_year, c
     WEIGHT_FORM = 1.15
     WEIGHT_OFFENSE = 0.50  # 得点力の重み (NEW)
     WEIGHT_DEFENSE = 0.50  # 守備力の重み
-    HOME_ADVANTAGE = 0.95
+    HOME_ADVANTAGE = 1.10
     DRAW_THRESHOLD = 1.10
 
     # --- 1. 順位スコア ---
